@@ -53,9 +53,12 @@ export type BrowserRuntimeStatus = {
   running: boolean
 }
 
+export type FingerprintMode = 'off' | 'extension' | 'itbrowser'
+
 export type RuntimeInfo = {
   browserPath: string
   browserKind: 'chromium' | 'chrome-for-testing' | 'custom'
+  fingerprintMode: FingerprintMode
   fingerprintSpoofingEnabled: boolean
   managedBrowserCacheDir: string
 }

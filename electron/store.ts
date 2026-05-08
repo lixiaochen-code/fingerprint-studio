@@ -8,6 +8,14 @@ const DEFAULT_PROXY: ProxyConfig = {
   port: 7890
 }
 
+function systemLocale() {
+  return `${process.env.LANG || process.env.LC_ALL || process.env.LC_MESSAGES || ''}`.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+}
+
+function message(en: string, zh: string) {
+  return systemLocale() === 'zh' ? zh : en
+}
+
 const languages = ['zh-CN', 'en-US', 'en-GB', 'ja-JP', 'de-DE', 'fr-FR']
 const timezones = ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo']
 const viewports = [
@@ -18,16 +26,25 @@ const viewports = [
   { width: 1366, height: 768 }
 ]
 const fontSets = [
-  ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana'],
-  ['PingFang SC', 'Microsoft YaHei', 'Arial', 'Helvetica', 'Songti SC'],
+  ['Helvetica Neue', 'Arial', 'Times New Roman', 'Courier New', 'Verdana'],
+  ['PingFang SC', 'Hiragino Sans', 'Helvetica Neue', 'Arial', 'Songti SC'],
   ['Segoe UI', 'Calibri', 'Cambria', 'Arial', 'Verdana'],
-  ['Helvetica Neue', 'Avenir Next', 'Menlo', 'Georgia', 'Arial']
+  ['Ubuntu', 'DejaVu Sans', 'Liberation Sans', 'Arial', 'Noto Sans']
 ]
-const renderers = [
+const macRenderers = [
+  ['Apple Inc.', 'Apple M1'],
+  ['Apple Inc.', 'Apple M2'],
+  ['Apple Inc.', 'Apple M3'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)']
+]
+const windowsRenderers = [
   ['Google Inc. (Intel)', 'ANGLE (Intel, Intel(R) Iris(TM) Plus Graphics, OpenGL 4.1)'],
   ['Google Inc. (NVIDIA)', 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1660, OpenGL 4.1)'],
-  ['Google Inc. (AMD)', 'ANGLE (AMD, AMD Radeon Pro 560X, OpenGL 4.1)'],
-  ['Apple Inc.', 'Apple M2']
+  ['Google Inc. (AMD)', 'ANGLE (AMD, AMD Radeon RX 580, Direct3D11 vs_5_0 ps_5_0)']
+]
+const linuxRenderers = [
+  ['Google Inc. (Intel)', 'ANGLE (Intel, Mesa Intel(R) UHD Graphics, OpenGL 4.6)'],
+  ['Google Inc. (AMD)', 'ANGLE (AMD, AMD Radeon Graphics, OpenGL 4.6)']
 ]
 
 function pick<T>(items: T[]): T {
@@ -51,6 +68,35 @@ function chromeVersion() {
   return `${major}.0.${Math.floor(1000 + Math.random() * 7999)}.${Math.floor(10 + Math.random() * 89)}`
 }
 
+function hostFingerprintPlatform() {
+  if (process.platform === 'win32') {
+    return {
+      platform: 'Win32',
+      osToken: 'Windows NT 10.0; Win64; x64',
+      fonts: fontSets[2],
+      renderers: windowsRenderers
+    }
+  }
+  if (process.platform === 'linux') {
+    return {
+      platform: 'Linux x86_64',
+      osToken: 'X11; Linux x86_64',
+      fonts: fontSets[3],
+      renderers: linuxRenderers
+    }
+  }
+  return {
+    platform: 'MacIntel',
+    osToken: 'Macintosh; Intel Mac OS X 10_15_7',
+    fonts: pick([fontSets[0], fontSets[1]]),
+    renderers: macRenderers
+  }
+}
+
+function userAgentFor(osToken: string) {
+  return `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion()} Safari/537.36`
+}
+
 function normalizeUrl(url?: string) {
   const value = url?.trim()
   if (!value) return 'https://www.google.com'
@@ -59,19 +105,15 @@ function normalizeUrl(url?: string) {
 }
 
 export function makeFingerprint(partial?: Partial<FingerprintConfig>): FingerprintConfig {
+  const host = hostFingerprintPlatform()
   const viewport = partial?.viewport ?? pick(viewports)
-  const [webglVendor, webglRenderer] = partial?.webglVendor && partial?.webglRenderer
+  const acceptsExistingHostFingerprint = partial?.platform === host.platform
+  const [webglVendor, webglRenderer] = acceptsExistingHostFingerprint && partial?.webglVendor && partial?.webglRenderer
     ? [partial.webglVendor, partial.webglRenderer]
-    : pick(renderers)
-  const platform = partial?.platform ?? pick(['MacIntel', 'Win32', 'Linux x86_64'])
-  const osToken = platform === 'Win32'
-    ? 'Windows NT 10.0; Win64; x64'
-    : platform === 'MacIntel'
-      ? 'Macintosh; Intel Mac OS X 10_15_7'
-      : 'X11; Linux x86_64'
+    : pick(host.renderers)
 
   return {
-    userAgent: partial?.userAgent ?? `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion()} Safari/537.36`,
+    userAgent: acceptsExistingHostFingerprint && partial?.userAgent && partial.userAgent.includes(host.osToken) ? partial.userAgent : userAgentFor(host.osToken),
     language: partial?.language ?? pick(languages),
     timezone: partial?.timezone ?? pick(timezones),
     viewport,
@@ -81,7 +123,7 @@ export function makeFingerprint(partial?: Partial<FingerprintConfig>): Fingerpri
       colorDepth: pick([24, 30]),
       pixelDepth: pick([24, 30])
     },
-    platform,
+    platform: host.platform,
     hardwareConcurrency: partial?.hardwareConcurrency ?? pick([4, 6, 8, 10, 12]),
     deviceMemory: partial?.deviceMemory ?? pick([4, 8, 16]),
     deviceScaleFactor: partial?.deviceScaleFactor ?? pick([1, 1.25, 1.5, 2]),
@@ -92,7 +134,7 @@ export function makeFingerprint(partial?: Partial<FingerprintConfig>): Fingerpri
     audioNoise: partial?.audioNoise ?? Number((Math.random() * 0.00001).toFixed(8)),
     webglVendor,
     webglRenderer,
-    fonts: partial?.fonts?.length ? partial.fonts : pick(fontSets)
+    fonts: acceptsExistingHostFingerprint && partial?.fonts?.length ? partial.fonts : host.fonts
   }
 }
 
@@ -132,7 +174,7 @@ export class ProfileStore {
 
     const profile: BrowserProfile = {
       id: profileId,
-      name: draft.name.trim() || existing?.name || `环境 ${this.profiles.length + 1}`,
+      name: draft.name.trim() || existing?.name || message(`Environment ${this.profiles.length + 1}`, `环境 ${this.profiles.length + 1}`),
       platform: draft.platform?.trim() || existing?.platform || 'other',
       notes: draft.notes?.trim() || existing?.notes || '',
       startUrl: normalizeUrl(draft.startUrl || existing?.startUrl),
@@ -232,7 +274,7 @@ export class ProfileStore {
   setActivePluginVersion(pluginIdValue: string, versionIdValue: string) {
     const plugin = this.plugins.find((item) => item.id === pluginIdValue)
     if (!plugin || !plugin.versions.some((version) => version.id === versionIdValue)) {
-      throw new Error('插件或版本不存在')
+      throw new Error(message('Plugin or version does not exist', '插件或版本不存在'))
     }
     this.plugins = this.plugins.map((item) => item.id === pluginIdValue
       ? { ...item, activeVersionId: versionIdValue, updatedAt: new Date().toISOString() }
@@ -251,13 +293,18 @@ export class ProfileStore {
 
   private load() {
     try {
-      this.profiles = fs.existsSync(this.profilesFile)
-        ? (JSON.parse(fs.readFileSync(this.profilesFile, 'utf8')) as BrowserProfile[]).map((profile) => ({
+      const rawProfiles = fs.existsSync(this.profilesFile)
+        ? JSON.parse(fs.readFileSync(this.profilesFile, 'utf8')) as BrowserProfile[]
+        : []
+      const normalizedProfiles = rawProfiles.map((profile) => ({
           ...profile,
           enabledPluginIds: profile.enabledPluginIds ?? [],
           fingerprint: makeFingerprint(profile.fingerprint)
         }))
-        : []
+      this.profiles = normalizedProfiles
+      if (JSON.stringify(rawProfiles) !== JSON.stringify(normalizedProfiles)) {
+        fs.writeFileSync(this.profilesFile, JSON.stringify(normalizedProfiles, null, 2))
+      }
     } catch {
       this.profiles = []
     }

@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
 import { Browser, getInstalledBrowsers, getVersionComparator } from '@puppeteer/browsers'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserProfile, BrowserRuntimeStatus, ProfileDraft, RuntimeInfo } from './types'
+import type { BrowserProfile, BrowserRuntimeStatus, FingerprintMode, FingerprintConfig, ProfileDraft, RuntimeInfo } from './types'
 
 const isDev = !app.isPackaged
 const execFileAsync = promisify(execFile)
@@ -14,8 +14,24 @@ let mainWindow: BrowserWindow | undefined
 let store: ProfileStore
 const profileProcesses = new Map<string, ChildProcess>()
 
+function appLocale() {
+  return app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en'
+}
+
+function message(en: string, zh: string) {
+  return appLocale() === 'zh' ? zh : en
+}
+
+function fingerprintMode(): FingerprintMode {
+  const mode = (process.env.AUTO_REGISTRY_FINGERPRINT_MODE || '').toLowerCase()
+  if (mode === 'off' || mode === 'extension' || mode === 'itbrowser') return mode
+  if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '0') return 'off'
+  if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '1') return 'itbrowser'
+  return 'extension'
+}
+
 function fingerprintSpoofingEnabled() {
-  return process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '1'
+  return fingerprintMode() !== 'off'
 }
 
 function runtimeStatus(): BrowserRuntimeStatus[] {
@@ -33,8 +49,12 @@ function managedBrowserCacheDir() {
   return path.join(process.cwd(), '.browsers')
 }
 
+function configuredBrowserPath() {
+  return process.env.AUTO_REGISTRY_BROWSER_PATH || process.env.AUTO_REGISTRY_CHROMIUM || process.env.AUTO_REGISTRY_CHROME
+}
+
 async function managedChromeExecutablePath() {
-  const overridePath = process.env.AUTO_REGISTRY_CHROMIUM
+  const overridePath = configuredBrowserPath()
   if (overridePath && fs.existsSync(overridePath)) return overridePath
 
   const installedBrowsers = await getInstalledBrowsers({ cacheDir: managedBrowserCacheDir() })
@@ -49,14 +69,17 @@ async function managedChromeExecutablePath() {
 
   const found = installedChromium[0]?.executablePath || installedChrome[0]?.executablePath
   if (!found) {
-    throw new Error('没有找到应用管理的 Chromium/Chrome，请先运行 pnpm run browser:install:chromium')
+    throw new Error(message(
+      'No managed Chromium/Chrome was found. Run pnpm run browser:install:chromium first.',
+      '没有找到应用管理的 Chromium/Chrome，请先运行 pnpm run browser:install:chromium'
+    ))
   }
   return found
 }
 
 async function runtimeInfo(): Promise<RuntimeInfo> {
   const browserPath = await managedChromeExecutablePath()
-  const browserKind = process.env.AUTO_REGISTRY_CHROMIUM
+  const browserKind = configuredBrowserPath()
     ? 'custom'
     : browserPath.includes('/chromium/')
       ? 'chromium'
@@ -65,6 +88,7 @@ async function runtimeInfo(): Promise<RuntimeInfo> {
   return {
     browserPath,
     browserKind,
+    fingerprintMode: fingerprintMode(),
     fingerprintSpoofingEnabled: fingerprintSpoofingEnabled(),
     managedBrowserCacheDir: managedBrowserCacheDir()
   }
@@ -117,6 +141,58 @@ function enableExtensionDeveloperMode(profilePath: string) {
   fs.writeFileSync(masterPreferencesPath, JSON.stringify(preferences, null, 2))
 }
 
+function fingerprintPayload(fingerprint: FingerprintConfig) {
+  const languages = [fingerprint.language, String(fingerprint.language || '').split('-')[0]].filter(Boolean)
+  return {
+    schemaVersion: 1,
+    userAgent: fingerprint.userAgent,
+    language: fingerprint.language,
+    languages,
+    platform: fingerprint.platform,
+    hardwareConcurrency: fingerprint.hardwareConcurrency || 8,
+    deviceMemory: fingerprint.deviceMemory || 8,
+    timezone: fingerprint.timezone,
+    webglVendor: fingerprint.webglVendor,
+    webglRenderer: fingerprint.webglRenderer,
+    canvasNoise: fingerprint.canvasNoise,
+    audioNoise: fingerprint.audioNoise,
+    viewport: fingerprint.viewport,
+    screen: fingerprint.screen,
+    deviceScaleFactor: fingerprint.deviceScaleFactor,
+    fonts: fingerprint.fonts,
+    webRtcPolicy: fingerprint.webRtcPolicy,
+    navigator: {
+      userAgent: fingerprint.userAgent,
+      language: fingerprint.language,
+      languages,
+      platform: fingerprint.platform,
+      hardwareConcurrency: fingerprint.hardwareConcurrency || 8,
+      deviceMemory: fingerprint.deviceMemory || 8,
+      maxTouchPoints: fingerprint.maxTouchPoints || 0,
+      doNotTrack: fingerprint.doNotTrack
+    },
+    locale: {
+      language: fingerprint.language,
+      languages,
+      timezone: fingerprint.timezone
+    },
+    webgl: {
+      vendor: fingerprint.webglVendor,
+      renderer: fingerprint.webglRenderer
+    },
+    noise: {
+      canvas: fingerprint.canvasNoise,
+      audio: fingerprint.audioNoise
+    }
+  }
+}
+
+function writeFingerprintPayload(profile: BrowserProfile) {
+  const configPath = path.join(profile.profilePath, 'fingerprint.json')
+  fs.writeFileSync(configPath, JSON.stringify(fingerprintPayload(profile.fingerprint), null, 2))
+  return configPath
+}
+
 function ensureFingerprintExtension(profile: BrowserProfile) {
   const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')
   fs.mkdirSync(extensionPath, { recursive: true })
@@ -142,7 +218,7 @@ function ensureFingerprintExtension(profile: BrowserProfile) {
     ]
   }
 
-  const config = JSON.stringify(profile.fingerprint)
+  const config = JSON.stringify(fingerprintPayload(profile.fingerprint))
   const content = `
 const configTag = document.createElement('script');
 configTag.id = 'auto-registry-fingerprint-config';
@@ -159,50 +235,48 @@ script.onload = () => script.remove();
 (() => {
   const configNode = document.getElementById('auto-registry-fingerprint-config');
   if (!configNode) return;
-  const fp = JSON.parse(configNode.textContent || '{}');
+  const payload = JSON.parse(configNode.textContent || '{}');
+  const nav = payload.navigator || {};
+  const locale = payload.locale || {};
+  const viewport = payload.viewport || {};
+  const screen = payload.screen || {};
+  const webgl = payload.webgl || {};
+  const noise = payload.noise || {};
   configNode.remove();
   const define = (target, key, value) => {
+    if (typeof value === 'undefined') return;
     try { Object.defineProperty(target, key, { get: () => value, configurable: true }); } catch {}
   };
-  define(Navigator.prototype, 'userAgent', fp.userAgent);
-  define(Navigator.prototype, 'language', fp.language);
-  define(Navigator.prototype, 'languages', [fp.language, String(fp.language || '').split('-')[0]].filter(Boolean));
-  define(Navigator.prototype, 'platform', fp.platform);
-  define(Navigator.prototype, 'hardwareConcurrency', fp.hardwareConcurrency);
-  define(Navigator.prototype, 'deviceMemory', fp.deviceMemory);
-  define(Navigator.prototype, 'maxTouchPoints', fp.maxTouchPoints);
-  define(Navigator.prototype, 'doNotTrack', fp.doNotTrack);
-  define(Screen.prototype, 'width', fp.viewport?.width);
-  define(Screen.prototype, 'height', fp.viewport?.height);
-  define(Screen.prototype, 'availWidth', fp.screen?.availWidth);
-  define(Screen.prototype, 'availHeight', fp.screen?.availHeight);
-  define(Screen.prototype, 'colorDepth', fp.screen?.colorDepth);
-  define(Screen.prototype, 'pixelDepth', fp.screen?.pixelDepth);
-  define(window, 'devicePixelRatio', fp.deviceScaleFactor);
+  define(Navigator.prototype, 'userAgent', nav.userAgent);
+  define(Navigator.prototype, 'appVersion', String(nav.userAgent || '').replace(/^Mozilla\\//, ''));
+  define(Navigator.prototype, 'language', nav.language);
+  define(Navigator.prototype, 'languages', nav.languages);
+  define(Navigator.prototype, 'platform', nav.platform);
+  define(Navigator.prototype, 'hardwareConcurrency', nav.hardwareConcurrency);
+  define(Navigator.prototype, 'deviceMemory', nav.deviceMemory);
+  define(Navigator.prototype, 'maxTouchPoints', nav.maxTouchPoints);
+  define(Navigator.prototype, 'doNotTrack', nav.doNotTrack);
+  define(Screen.prototype, 'colorDepth', screen.colorDepth);
+  define(Screen.prototype, 'pixelDepth', screen.pixelDepth);
 
-  const originalDateTimeFormat = Intl.DateTimeFormat;
-  Intl.DateTimeFormat = function(locale, options = {}) {
-    return new originalDateTimeFormat(locale, { ...options, timeZone: fp.timezone });
-  };
-  Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
-  const originalResolvedOptions = originalDateTimeFormat.prototype.resolvedOptions;
+  const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
   Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-    return { ...originalResolvedOptions.call(this), timeZone: fp.timezone };
+    return { ...originalResolvedOptions.call(this), locale: locale.language, timeZone: locale.timezone };
   };
 
   const patchWebGL = (Ctor) => {
     if (!Ctor?.prototype?.getParameter) return;
     const original = Ctor.prototype.getParameter;
     Ctor.prototype.getParameter = function(parameter) {
-      if (parameter === 37445) return fp.webglVendor;
-      if (parameter === 37446) return fp.webglRenderer;
+      if (parameter === 37445) return webgl.vendor;
+      if (parameter === 37446) return webgl.renderer;
       return original.call(this, parameter);
     };
   };
   patchWebGL(window.WebGLRenderingContext);
   patchWebGL(window.WebGL2RenderingContext);
 
-  const canvasNoise = Number(fp.canvasNoise || 0);
+  const canvasNoise = Number(noise.canvas || 0);
   const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function(...args) {
     try {
@@ -224,29 +298,30 @@ script.onload = () => script.remove();
     return data;
   };
 
-  const originalCreateAnalyser = AudioContext?.prototype?.createAnalyser;
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  const originalCreateAnalyser = AudioContextCtor?.prototype?.createAnalyser;
   if (originalCreateAnalyser) {
-    AudioContext.prototype.createAnalyser = function(...args) {
+    AudioContextCtor.prototype.createAnalyser = function(...args) {
       const analyser = originalCreateAnalyser.apply(this, args);
       const originalGetFloatFrequencyData = analyser.getFloatFrequencyData.bind(analyser);
       analyser.getFloatFrequencyData = (array) => {
         originalGetFloatFrequencyData(array);
-        const noise = Number(fp.audioNoise || 0);
-        for (let i = 0; i < array.length; i += 16) array[i] += noise;
+        const audioNoise = Number(noise.audio || 0);
+        for (let i = 0; i < array.length; i += 16) array[i] += audioNoise;
       };
       return analyser;
     };
   }
 
   const originalRTCPeerConnection = window.RTCPeerConnection;
-  if (originalRTCPeerConnection && fp.webRtcPolicy === 'disable-non-proxied-udp') {
+  if (originalRTCPeerConnection && payload.webRtcPolicy === 'disable-non-proxied-udp') {
     window.RTCPeerConnection = function(configuration = {}, ...rest) {
       return new originalRTCPeerConnection({ ...configuration, iceTransportPolicy: 'relay' }, ...rest);
     };
     window.RTCPeerConnection.prototype = originalRTCPeerConnection.prototype;
   }
 
-  const fontSet = new Set(fp.fonts || []);
+  const fontSet = new Set(payload.fonts || []);
   if (document.fonts?.check) {
     const originalCheck = document.fonts.check.bind(document.fonts);
     document.fonts.check = (font, text) => {
@@ -264,6 +339,15 @@ script.onload = () => script.remove();
   return extensionPath
 }
 
+function assertLaunchableBrowser(browserPath: string) {
+  if (process.platform !== 'win32' && browserPath.toLowerCase().endsWith('.exe')) {
+    throw new Error(message(
+      `The configured browser is a Windows executable and cannot run on ${process.platform}: ${browserPath}`,
+      `当前配置的浏览器是 Windows 可执行文件，无法在 ${process.platform} 上运行：${browserPath}`
+    ))
+  }
+}
+
 function findManifestDir(root: string): string | undefined {
   const entries = fs.readdirSync(root, { withFileTypes: true })
   if (entries.some((entry) => entry.isFile() && entry.name === 'manifest.json')) {
@@ -279,7 +363,7 @@ function findManifestDir(root: string): string | undefined {
 
 async function importPluginZip() {
   const dialogOptions: OpenDialogOptions = {
-    title: '选择插件 ZIP',
+    title: message('Select extension ZIP', '选择插件 ZIP'),
     properties: ['openFile'],
     filters: [{ name: 'Chrome Extension ZIP', extensions: ['zip'] }]
   }
@@ -297,7 +381,10 @@ async function importPluginZip() {
 
   const manifestDir = findManifestDir(tempDir)
   if (!manifestDir) {
-    throw new Error('ZIP 中没有找到 manifest.json，请确认这是 Chrome 扩展插件包')
+    throw new Error(message(
+      'manifest.json was not found in the ZIP. Please confirm this is a Chrome extension package.',
+      'ZIP 中没有找到 manifest.json，请确认这是 Chrome 扩展插件包'
+    ))
   }
 
   const manifest = JSON.parse(fs.readFileSync(path.join(manifestDir, 'manifest.json'), 'utf8')) as {
@@ -334,12 +421,14 @@ async function createMainWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      devTools: true
     }
   })
 
   if (isDev) {
     await mainWindow.loadURL('http://127.0.0.1:5173')
+    mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
     await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -352,10 +441,11 @@ async function launchProfile(profile: BrowserProfile) {
     return
   }
 
+  const mode = fingerprintMode()
+  const fingerprintEnabled = mode !== 'off'
   const activePlugins = store.activePluginVersions(profile.enabledPluginIds)
   const extensionPaths = [
-    // We can keep the extension as a fallback or for things itbrowser doesn't cover
-    ...(fingerprintSpoofingEnabled() ? [ensureFingerprintExtension(profile)] : []),
+    ...(fingerprintEnabled ? [ensureFingerprintExtension(profile)] : []),
     ...activePlugins.map((plugin) => plugin.path)
   ].join(',')
   enableExtensionDeveloperMode(profile.profilePath)
@@ -370,37 +460,14 @@ async function launchProfile(profile: BrowserProfile) {
     '--enable-extensions'
   ]
 
-  if (fingerprintSpoofingEnabled()) {
-    // Integration with itbrowser-net undetectable fingerprint browser
-    // Generate the fingerprint.json file required by the --itbrowser flag
-    const itBrowserConfigPath = path.join(profile.profilePath, 'itbrowser_config.json')
-    const itBrowserConfig = {
-      userAgent: profile.fingerprint.userAgent,
-      language: profile.fingerprint.language,
-      languages: [profile.fingerprint.language, String(profile.fingerprint.language || '').split('-')[0]].filter(Boolean),
-      platform: profile.fingerprint.platform,
-      hardwareConcurrency: profile.fingerprint.hardwareConcurrency || 8,
-      deviceMemory: profile.fingerprint.deviceMemory || 8,
-      timezone: profile.fingerprint.timezone,
-      webglVendor: profile.fingerprint.webglVendor,
-      webglRenderer: profile.fingerprint.webglRenderer,
-      canvasNoise: profile.fingerprint.canvasNoise,
-      audioNoise: profile.fingerprint.audioNoise,
-      webRtcPolicy: profile.fingerprint.webRtcPolicy,
-      viewport: profile.fingerprint.viewport,
-      screen: profile.fingerprint.screen,
-      deviceScaleFactor: profile.fingerprint.deviceScaleFactor,
-      fonts: profile.fingerprint.fonts
+  if (fingerprintEnabled) {
+    const fingerprintConfigPath = writeFingerprintPayload(profile)
+    if (mode === 'itbrowser') {
+    args.push(`--itbrowser=${fingerprintConfigPath}`)
     }
-    fs.writeFileSync(itBrowserConfigPath, JSON.stringify(itBrowserConfig, null, 2))
-    
-    // Add the magic flag
-    args.push(`--itbrowser=${itBrowserConfigPath}`)
-    
-    // Fallback/Legacy spoofing for standard Chromium
+
     args.push(`--user-agent=${profile.fingerprint.userAgent}`)
     args.push(`--lang=${profile.fingerprint.language}`)
-    args.push(`--force-device-scale-factor=${profile.fingerprint.deviceScaleFactor}`)
     args.push(`--force-webrtc-ip-handling-policy=${profile.fingerprint.webRtcPolicy === 'disable-non-proxied-udp' ? 'disable_non_proxied_udp' : 'default'}`)
   }
 
@@ -410,7 +477,9 @@ async function launchProfile(profile: BrowserProfile) {
   }
   args.push(profile.startUrl)
 
-  const child = spawn(await managedChromeExecutablePath(), args, {
+  const browserPath = await managedChromeExecutablePath()
+  assertLaunchableBrowser(browserPath)
+  const child = spawn(browserPath, args, {
     detached: true,
     stdio: 'ignore'
   })

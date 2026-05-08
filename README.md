@@ -17,6 +17,28 @@ pnpm install
 pnpm run dev
 ```
 
+## 浏览器与指纹模式
+
+项目不绑定某个特定 Chromium 内核。默认会使用 `.browsers` 中由 `@puppeteer/browsers` 安装的 Chrome/Chromium，也可以指定任意可执行浏览器路径：
+
+```bash
+AUTO_REGISTRY_BROWSER_PATH="/path/to/chrome-or-chromium" pnpm run dev
+```
+
+指纹逻辑默认使用通用模式：
+
+- `AUTO_REGISTRY_FINGERPRINT_MODE=extension`：默认值。通过启动参数和运行时扩展改写 UA、语言、时区、屏幕、WebGL、Canvas、Audio、WebRTC 等常见指纹面，适用于标准 Chrome/Chromium。
+- `AUTO_REGISTRY_FINGERPRINT_MODE=itbrowser`：在通用模式基础上额外生成 `fingerprint.json` 并传入 `--itbrowser=<path>`，仅适用于支持该私有参数的自定义 Chromium。
+- `AUTO_REGISTRY_FINGERPRINT_MODE=off`：关闭指纹改写，只保留独立用户目录、代理和启动 URL。
+
+兼容旧环境变量：
+
+```bash
+AUTO_REGISTRY_CHROMIUM="/path/to/chrome" AUTO_REGISTRY_ENABLE_FINGERPRINT=1 pnpm run dev
+```
+
+其中 `AUTO_REGISTRY_ENABLE_FINGERPRINT=1` 会映射到 `itbrowser` 模式；新配置建议使用 `AUTO_REGISTRY_FINGERPRINT_MODE`。
+
 ## 构建检查
 
 ```bash

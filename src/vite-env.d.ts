@@ -24,6 +24,7 @@ declare global {
         info: () => Promise<{
           browserPath: string
           browserKind: 'chromium' | 'chrome-for-testing' | 'custom'
+          fingerprintMode: 'off' | 'extension' | 'itbrowser'
           fingerprintSpoofingEnabled: boolean
           managedBrowserCacheDir: string
         }>
