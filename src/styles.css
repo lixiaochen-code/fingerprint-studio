@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-display: "Space Grotesk", sans-serif;
+
+  --color-background: #0a0a0a;
+  --color-foreground: #e5e2e1;
+  
+  --color-primary: #00ff9d;
+  --color-primary-foreground: #0a0a0a;
+  
+  --color-secondary: #131313;
+  --color-secondary-foreground: #e5e2e1;
+  
+  --color-accent: #00e0ff;
+  --color-accent-foreground: #0a0a0a;
+  
+  --color-destructive: #ff4d4f;
+  --color-destructive-foreground: #ffffff;
+  
+  --color-muted: #1a1a1a;
+  --color-muted-foreground: #849587;
+  
+  --color-border: #2a2a2a;
+  --color-input: #131313;
+  --color-ring: #00ff9d;
+
+  --radius-lg: 0px;
+  --radius-md: 0px;
+  --radius-sm: 0px;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}
+
+.brand-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00ff9d;
+}
