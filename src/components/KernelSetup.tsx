@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { interpolate } from '@/lib/i18n'
 import type { KernelInstallProgress, KernelStatus, KernelType } from '../../electron/types'
 
 type Locale = 'en' | 'zh'
@@ -54,10 +55,6 @@ const labels = {
     statusMissing: '未安装'
   }
 } as const
-
-function interpolate(template: string, values: Record<string, string>) {
-  return Object.entries(values).reduce((result, [key, value]) => result.split(`{{${key}}`).join(value), template)
-}
 
 function formatMB(bytes?: number) {
   if (!bytes || bytes <= 0) return '—'

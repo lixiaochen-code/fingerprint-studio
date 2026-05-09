@@ -254,6 +254,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('profiles:list', () => store.list())
   ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => store.upsert(draft))
   ipcMain.handle('profiles:remove', (_event, id: string) => store.remove(id))
+  ipcMain.handle('profiles:duplicate', (_event, id: string) => store.duplicate(id))
   ipcMain.handle('profiles:randomFingerprint', (_event, targetOs?: string) => makeFingerprint(undefined, targetOs as never))
   ipcMain.handle('profiles:status', () => runtimeStatus())
   ipcMain.handle('profiles:launch', async (_event, id: string) => {

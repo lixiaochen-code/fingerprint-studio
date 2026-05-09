@@ -105,6 +105,21 @@ export class ProfileStore {
     this.save()
   }
 
+  duplicate(profileId: string) {
+    const source = this.profiles.find((profile) => profile.id === profileId)
+    if (!source) throw new Error(message('Profile not found', '环境不存在'))
+    return this.upsert({
+      name: `${source.name} (copy)`,
+      platform: source.platform,
+      notes: source.notes,
+      startUrl: source.startUrl,
+      enabledPluginIds: [...source.enabledPluginIds],
+      proxy: { ...source.proxy },
+      fingerprint: { ...source.fingerprint },
+      targetOs: source.fingerprint.targetOs
+    })
+  }
+
   markOpened(profileId: string) {
     const now = new Date().toISOString()
     this.profiles = this.profiles.map((profile) => profile.id === profileId ? { ...profile, lastOpenedAt: now, updatedAt: now } : profile)
