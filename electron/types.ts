@@ -5,7 +5,12 @@ export type ProxyConfig = {
   password?: string
 }
 
+export type TargetOs = 'windows' | 'mac' | 'linux'
+export type TargetOsChoice = TargetOs | 'random'
+export type HostOs = 'win32' | 'darwin' | 'linux'
+
 export type FingerprintConfig = {
+  targetOs: TargetOs
   userAgent: string
   language: string
   timezone: string
@@ -55,11 +60,43 @@ export type BrowserRuntimeStatus = {
 
 export type FingerprintMode = 'off' | 'extension' | 'itbrowser'
 
+export type KernelType = 'chromium' | 'itbrowser'
+
+export type KernelStatus = {
+  type: KernelType
+  installed: boolean
+  path?: string
+  version?: string
+  sizeMB?: number
+}
+
+export type KernelStatusMap = {
+  chromium: KernelStatus
+  itbrowser: KernelStatus
+}
+
+export type KernelInstallPhase = 'pending' | 'download' | 'extract' | 'verify' | 'done' | 'error' | 'canceled'
+
+export type KernelInstallProgress = {
+  kernel: KernelType
+  phase: KernelInstallPhase
+  bytesDone?: number
+  bytesTotal?: number
+  message?: string
+}
+
+export type KernelMissingError = {
+  code: 'KERNEL_MISSING'
+  kernel: KernelType
+  message: string
+}
+
 export type RuntimeInfo = {
-  browserPath: string
-  browserKind: 'chromium' | 'chrome-for-testing' | 'custom'
+  hostOs: HostOs
   fingerprintMode: FingerprintMode
   fingerprintSpoofingEnabled: boolean
+  kernels: KernelStatusMap
+  itbrowserSupported: boolean
   managedBrowserCacheDir: string
 }
 
@@ -72,6 +109,7 @@ export type ProfileDraft = {
   enabledPluginIds?: string[]
   proxy?: Partial<ProxyConfig>
   fingerprint?: Partial<FingerprintConfig>
+  targetOs?: TargetOsChoice
 }
 
 export type PluginVersion = {

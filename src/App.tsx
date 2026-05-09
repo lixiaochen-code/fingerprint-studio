@@ -20,9 +20,11 @@ import {
   ShieldCheck,
   Settings2,
   Languages,
-  X
+  X,
+  Download
 } from 'lucide-react'
-import type { BrowserPlugin, BrowserProfile, ProfileDraft, RuntimeInfo } from '../electron/types'
+import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, TargetOs, TargetOsChoice } from '../electron/types'
+import { KernelSetup } from './components/KernelSetup'
 import './styles.css'
 
 type Locale = 'en' | 'zh'
@@ -48,6 +50,7 @@ const translations = {
     notesPlaceholder: 'Optional operating notes',
     proxyHost: 'Proxy Host',
     proxyPort: 'Proxy Port',
+    targetOs: 'Target OS',
     envAbbr: 'ENV',
     pluginAbbr: 'PLG',
     runningAbbr: 'RUN',
@@ -56,8 +59,8 @@ const translations = {
     languageLabel: 'Switch language',
     riskTitle: 'Fingerprint Mode: {{mode}}',
     secureTitle: 'Fingerprint Mode: Off',
-    riskDescription: 'Generic Chromium spoofing is active through launch flags and the runtime fingerprint extension.',
-    secureDescription: 'Fingerprint spoofing is disabled. Browser path: {{path}}',
+    riskDescription: 'Active kernel: {{kernel}}. Host {{host}}. itbrowser native fingerprint requires Windows host with itbrowser kernel installed.',
+    secureDescription: 'Fingerprint spoofing is disabled.',
     searchPlaceholder: 'SEARCH BY NAME / PLATFORM / PROXY...',
     refresh: 'REFRESH',
     environment: 'Environment',
@@ -71,6 +74,15 @@ const translations = {
     stop: 'STOP',
     run: 'RUN',
     empty: 'NO ENVIRONMENTS FOUND.',
+    osWindows: 'WINDOWS',
+    osMac: 'MAC',
+    osLinux: 'LINUX',
+    osRandom: 'RANDOM',
+    kernels: 'Kernels',
+    installChromium: 'Install Chromium',
+    installItbrowser: 'Install itbrowser',
+    installed: 'Installed',
+    notInstalled: 'Not installed',
     platformNames: {
       amazon: 'AMAZON',
       shopify: 'SHOPIFY',
@@ -100,6 +112,7 @@ const translations = {
     notesPlaceholder: '可选运营备注',
     proxyHost: '代理主机',
     proxyPort: '代理端口',
+    targetOs: '目标系统',
     envAbbr: '环境',
     pluginAbbr: '插件',
     runningAbbr: '运行',
@@ -108,8 +121,8 @@ const translations = {
     languageLabel: '切换语言',
     riskTitle: '指纹模式：{{mode}}',
     secureTitle: '指纹模式：关闭',
-    riskDescription: '已通过启动参数和运行时指纹扩展启用通用 Chromium 指纹改写。',
-    secureDescription: '指纹改写已关闭。浏览器路径：{{path}}',
+    riskDescription: '当前内核：{{kernel}}，宿主：{{host}}。itbrowser 原生指纹需要 Windows 宿主机并安装 itbrowser 内核。',
+    secureDescription: '指纹改写已关闭。',
     searchPlaceholder: '按名称 / 平台 / 代理搜索...',
     refresh: '刷新',
     environment: '环境',
@@ -123,6 +136,15 @@ const translations = {
     stop: '停止',
     run: '启动',
     empty: '暂无环境。',
+    osWindows: 'WINDOWS',
+    osMac: 'MAC',
+    osLinux: 'LINUX',
+    osRandom: '随机',
+    kernels: '内核',
+    installChromium: '安装 Chromium',
+    installItbrowser: '安装 itbrowser',
+    installed: '已安装',
+    notInstalled: '未安装',
     platformNames: {
       amazon: '亚马逊',
       shopify: 'Shopify',
@@ -135,6 +157,7 @@ const translations = {
 } as const
 
 const platformOptions = ['amazon', 'shopify', 'ebay', 'tiktok', 'walmart', 'other']
+const targetOsOptions: TargetOsChoice[] = ['random', 'windows', 'mac', 'linux']
 
 type CreateForm = {
   name: string
@@ -143,6 +166,7 @@ type CreateForm = {
   proxyHost: string
   proxyPort: string
   notes: string
+  targetOs: TargetOsChoice
 }
 
 const defaultCreateForm: CreateForm = {
@@ -151,7 +175,8 @@ const defaultCreateForm: CreateForm = {
   startUrl: 'https://www.google.com',
   proxyHost: '127.0.0.1',
   proxyPort: '7890',
-  notes: ''
+  notes: '',
+  targetOs: 'random'
 }
 
 function initialLocale(): Locale {
@@ -169,6 +194,28 @@ function platformLabel(platform: string, locale: Locale) {
   return names[platform] || platform.toUpperCase()
 }
 
+function targetOsLabel(target: TargetOsChoice, locale: Locale) {
+  const t = translations[locale]
+  if (target === 'windows') return t.osWindows
+  if (target === 'mac') return t.osMac
+  if (target === 'linux') return t.osLinux
+  return t.osRandom
+}
+
+function activeKernelLabel(runtime: RuntimeInfo | undefined) {
+  if (!runtime) return '—'
+  if (runtime.hostOs === 'win32' && runtime.kernels.itbrowser.installed) return 'ITBROWSER'
+  if (runtime.kernels.chromium.installed) return 'CHROMIUM'
+  return 'NONE'
+}
+
+function hostLabel(runtime: RuntimeInfo | undefined) {
+  if (!runtime) return '—'
+  if (runtime.hostOs === 'win32') return 'WINDOWS'
+  if (runtime.hostOs === 'darwin') return 'MAC'
+  return 'LINUX'
+}
+
 export function App() {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [plugins, setPlugins] = useState<BrowserPlugin[]>([])
@@ -182,6 +229,8 @@ export function App() {
   const [isCreating, setIsCreating] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [notice, setNotice] = useState<string>()
+  const [setupKernel, setSetupKernel] = useState<KernelType>()
+  const [showSettings, setShowSettings] = useState(false)
   const t = translations[locale]
 
   async function load() {
@@ -208,10 +257,17 @@ export function App() {
     window.localStorage.setItem('auto-registry-locale', locale)
   }, [locale])
 
+  useEffect(() => {
+    if (!runtimeInfo) return
+    if (!runtimeInfo.kernels.chromium.installed && setupKernel === undefined) {
+      setSetupKernel('chromium')
+    }
+  }, [runtimeInfo, setupKernel])
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!needle) return profiles
-    return profiles.filter((profile) => 
+    return profiles.filter((profile) =>
       [profile.name, profile.platform, profile.notes, profile.proxy.host].join(' ').toLowerCase().includes(needle)
     )
   }, [profiles, query])
@@ -219,7 +275,14 @@ export function App() {
   async function launch(profile: BrowserProfile) {
     setBusyId(profile.id)
     try {
-      await window.registry.profiles.launch(profile.id)
+      const result = await window.registry.profiles.launch(profile.id)
+      if (!result.ok) {
+        if (result.error?.code === 'KERNEL_MISSING' && result.error.kernel) {
+          setSetupKernel(result.error.kernel)
+        } else {
+          setNotice(interpolate(t.actionFailed, { action: t.run, message: result.error?.message || 'unknown' }))
+        }
+      }
       await load()
     } catch (error) {
       console.error(error)
@@ -249,6 +312,7 @@ export function App() {
         platform: createForm.platform,
         startUrl: createForm.startUrl,
         notes: createForm.notes,
+        targetOs: createForm.targetOs,
         proxy: {
           host: createForm.proxyHost,
           port: Number(createForm.proxyPort) || 7890
@@ -285,7 +349,6 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
-      {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="flex h-16 items-center justify-between px-6">
           <div className="flex items-center gap-4">
@@ -299,11 +362,13 @@ export function App() {
                 <span className="opacity-20">|</span>
                 <span>{t.runningAbbr}:{runningIds.size}</span>
                 <span className="opacity-20">|</span>
-                <span className="text-primary">{runtimeInfo?.browserKind?.toUpperCase() || t.loading}</span>
+                <span className="text-primary">{activeKernelLabel(runtimeInfo)}</span>
+                <span className="opacity-20">|</span>
+                <span>HOST:{hostLabel(runtimeInfo)}</span>
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
@@ -323,7 +388,7 @@ export function App() {
               <Upload className="h-4 w-4" />
               {isImporting ? t.importing : t.import}
             </Button>
-            <Button variant="secondary" size="sm">
+            <Button variant="secondary" size="sm" onClick={() => setShowSettings((s) => !s)}>
               <Settings2 className="h-4 w-4" />
             </Button>
           </div>
@@ -331,7 +396,6 @@ export function App() {
       </header>
 
       <main className="p-6 space-y-6 max-w-[1600px] mx-auto">
-        {/* Status Alert */}
         <Alert variant={runtimeInfo?.fingerprintSpoofingEnabled ? "warning" : "success"} className="border-none bg-muted/50">
           {runtimeInfo?.fingerprintSpoofingEnabled ? <AlertTriangle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
           <AlertTitle className="text-[11px] tracking-[0.1em] uppercase">
@@ -340,11 +404,52 @@ export function App() {
               : t.secureTitle}
           </AlertTitle>
           <AlertDescription>
-            {runtimeInfo?.fingerprintSpoofingEnabled 
-              ? t.riskDescription
-              : interpolate(t.secureDescription, { path: runtimeInfo?.browserPath || t.loading })}
+            {runtimeInfo?.fingerprintSpoofingEnabled
+              ? interpolate(t.riskDescription, { kernel: activeKernelLabel(runtimeInfo), host: hostLabel(runtimeInfo) })
+              : t.secureDescription}
           </AlertDescription>
         </Alert>
+
+        {showSettings && runtimeInfo && (
+          <Card className="border border-border bg-secondary p-5">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h2 className="font-display text-sm font-bold uppercase tracking-wider">{t.kernels}</h2>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setShowSettings(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {(['chromium', 'itbrowser'] as KernelType[]).map((kernel) => {
+                const status = runtimeInfo.kernels[kernel]
+                const unsupported = kernel === 'itbrowser' && !runtimeInfo.itbrowserSupported
+                return (
+                  <div key={kernel} className="border border-border bg-background p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-display text-xs uppercase tracking-wider">{kernel}</div>
+                        <div className={`text-[11px] font-mono ${status.installed ? 'text-primary' : 'text-muted-foreground'}`}>
+                          {status.installed ? t.installed : t.notInstalled}
+                          {status.version ? ` · ${status.version}` : ''}
+                          {status.sizeMB ? ` · ${status.sizeMB} MB` : ''}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2"
+                        disabled={unsupported}
+                        onClick={() => setSetupKernel(kernel)}
+                      >
+                        <Download className="h-3 w-3" />
+                        {kernel === 'itbrowser' ? t.installItbrowser : t.installChromium}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )}
 
         {notice && (
           <Alert className="border-none bg-muted/50">
@@ -386,7 +491,19 @@ export function App() {
                   ))}
                 </select>
               </label>
-              <label className="space-y-2 xl:col-span-2">
+              <label className="space-y-2">
+                <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{t.targetOs}</span>
+                <select
+                  value={createForm.targetOs}
+                  onChange={(event) => setCreateForm((form) => ({ ...form, targetOs: event.target.value as TargetOsChoice }))}
+                  className="flex h-9 w-full border border-border bg-input px-3 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {targetOsOptions.map((option) => (
+                    <option key={option} value={option}>{targetOsLabel(option, locale)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
                 <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{t.startUrl}</span>
                 <Input
                   value={createForm.startUrl}
@@ -432,11 +549,10 @@ export function App() {
           </Card>
         )}
 
-        {/* Toolbar */}
         <div className="flex items-center gap-4">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input 
+            <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t.searchPlaceholder}
@@ -451,7 +567,6 @@ export function App() {
           </div>
         </div>
 
-        {/* Profiles Table */}
         <Card className="border-none bg-transparent">
           <Table>
             <TableHeader>
@@ -459,7 +574,7 @@ export function App() {
                 <TableHead>{t.environment}</TableHead>
                 <TableHead className="w-[120px]">{t.platform}</TableHead>
                 <TableHead className="w-[180px]">{t.proxy}</TableHead>
-                <TableHead className="w-[220px]">{t.fingerprint}</TableHead>
+                <TableHead className="w-[260px]">{t.fingerprint}</TableHead>
                 <TableHead className="w-[100px]">{t.status}</TableHead>
                 <TableHead className="text-right">{t.actions}</TableHead>
               </TableRow>
@@ -468,7 +583,8 @@ export function App() {
               {filtered.map((profile) => {
                 const isRunning = runningIds.has(profile.id)
                 const isBusy = busyId === profile.id
-                
+                const target = profile.fingerprint.targetOs as TargetOs
+
                 return (
                   <TableRow key={profile.id} className="group">
                     <TableCell>
@@ -490,9 +606,14 @@ export function App() {
                       </code>
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-col text-[11px] font-mono text-muted-foreground">
-                        <span>{profile.fingerprint.language?.toUpperCase()} / {profile.fingerprint.timezone?.split('/').pop()}</span>
-                        <span className="text-[9px] opacity-50 truncate max-w-[180px]">{profile.fingerprint.userAgent}</span>
+                      <div className="flex flex-col text-[11px] font-mono text-muted-foreground gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-1.5 py-0.5 bg-primary/15 text-primary text-[10px] font-bold tracking-wider">
+                            {targetOsLabel(target, locale)}
+                          </span>
+                          <span>{profile.fingerprint.language?.toUpperCase()} / {profile.fingerprint.timezone?.split('/').pop()}</span>
+                        </div>
+                        <span className="text-[9px] opacity-50 truncate max-w-[240px]">{profile.fingerprint.userAgent}</span>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -506,9 +627,9 @@ export function App() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         {isRunning ? (
-                          <Button 
-                            variant="destructive" 
-                            size="sm" 
+                          <Button
+                            variant="destructive"
+                            size="sm"
                             className="h-8 px-3"
                             disabled={isBusy}
                             onClick={() => stop(profile)}
@@ -517,9 +638,9 @@ export function App() {
                             {t.stop}
                           </Button>
                         ) : (
-                          <Button 
-                            variant="default" 
-                            size="sm" 
+                          <Button
+                            variant="default"
+                            size="sm"
                             className="h-8 px-3"
                             disabled={isBusy}
                             onClick={() => launch(profile)}
@@ -547,6 +668,16 @@ export function App() {
           </Table>
         </Card>
       </main>
+
+      <KernelSetup
+        open={setupKernel !== undefined}
+        kernel={setupKernel || 'chromium'}
+        status={setupKernel && runtimeInfo ? runtimeInfo.kernels[setupKernel] : undefined}
+        locale={locale}
+        hostSupportsItbrowser={runtimeInfo?.itbrowserSupported || false}
+        onClose={() => setSetupKernel(undefined)}
+        onInstalled={() => void load()}
+      />
     </div>
   )
 }

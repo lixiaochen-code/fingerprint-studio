@@ -13,6 +13,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "7zip-bin": "^5.2.0",
     "@ant-design/icons": "^6.2.1",
     "@puppeteer/browsers": "^2.13.0",
     "@radix-ui/react-slot": "^1.2.4",
@@ -20,6 +21,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
+    "node-7z": "^3.0.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "tailwind-merge": "^3.5.0"
@@ -27,12 +29,14 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^22.10.2",
+    "@types/node-7z": "^2.1.11",
     "@types/react": "^19.2.6",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.2.1",
     "electron": "39.8.9",
+    "electron-builder": "^26.8.1",
     "postcss": "^8.5.14",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",

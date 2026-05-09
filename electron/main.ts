@@ -4,9 +4,20 @@ import os from 'node:os'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
-import { Browser, getInstalledBrowsers, getVersionComparator } from '@puppeteer/browsers'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserProfile, BrowserRuntimeStatus, FingerprintMode, FingerprintConfig, ProfileDraft, RuntimeInfo } from './types'
+import type { BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, RuntimeInfo, KernelInstallProgress } from './types'
+import { hostOs } from './fingerprint'
+import {
+  KernelMissingError,
+  assertLaunchableBrowser,
+  browserCacheDirForRuntimeInfo,
+  buildLaunchArgs,
+  itbrowserSupported,
+  kernelStatusMap,
+  selectKernel
+} from './kernel'
+import { cancelInstall, installKernel, isInstalling } from './downloader'
+import { ensureDirs, pluginsRoot } from './paths'
 
 const isDev = !app.isPackaged
 const execFileAsync = promisify(execFile)
@@ -24,7 +35,7 @@ function message(en: string, zh: string) {
 
 function fingerprintMode(): FingerprintMode {
   const mode = (process.env.AUTO_REGISTRY_FINGERPRINT_MODE || '').toLowerCase()
-  if (mode === 'off' || mode === 'extension' || mode === 'itbrowser') return mode
+  if (mode === 'off' || mode === 'extension' || mode === 'itbrowser') return mode as FingerprintMode
   if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '0') return 'off'
   if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '1') return 'itbrowser'
   return 'extension'
@@ -45,52 +56,14 @@ function proxyUrl(profile: BrowserProfile) {
   return `http://${profile.proxy.host}:${profile.proxy.port}`
 }
 
-function managedBrowserCacheDir() {
-  return path.join(process.cwd(), '.browsers')
-}
-
-function configuredBrowserPath() {
-  return process.env.AUTO_REGISTRY_BROWSER_PATH || process.env.AUTO_REGISTRY_CHROMIUM || process.env.AUTO_REGISTRY_CHROME
-}
-
-async function managedChromeExecutablePath() {
-  const overridePath = configuredBrowserPath()
-  if (overridePath && fs.existsSync(overridePath)) return overridePath
-
-  const installedBrowsers = await getInstalledBrowsers({ cacheDir: managedBrowserCacheDir() })
-  const installedChromium = installedBrowsers
-    .filter((browser) => browser.browser === Browser.CHROMIUM)
-    .filter((browser) => fs.existsSync(browser.executablePath))
-    .sort((a, b) => getVersionComparator(Browser.CHROMIUM)(b.buildId, a.buildId))
-  const installedChrome = installedBrowsers
-    .filter((browser) => browser.browser === Browser.CHROME)
-    .filter((browser) => fs.existsSync(browser.executablePath))
-    .sort((a, b) => getVersionComparator(Browser.CHROME)(b.buildId, a.buildId))
-
-  const found = installedChromium[0]?.executablePath || installedChrome[0]?.executablePath
-  if (!found) {
-    throw new Error(message(
-      'No managed Chromium/Chrome was found. Run pnpm run browser:install:chromium first.',
-      '没有找到应用管理的 Chromium/Chrome，请先运行 pnpm run browser:install:chromium'
-    ))
-  }
-  return found
-}
-
 async function runtimeInfo(): Promise<RuntimeInfo> {
-  const browserPath = await managedChromeExecutablePath()
-  const browserKind = configuredBrowserPath()
-    ? 'custom'
-    : browserPath.includes('/chromium/')
-      ? 'chromium'
-      : 'chrome-for-testing'
-
   return {
-    browserPath,
-    browserKind,
+    hostOs: hostOs(),
     fingerprintMode: fingerprintMode(),
     fingerprintSpoofingEnabled: fingerprintSpoofingEnabled(),
-    managedBrowserCacheDir: managedBrowserCacheDir()
+    kernels: await kernelStatusMap(),
+    itbrowserSupported: itbrowserSupported(),
+    managedBrowserCacheDir: browserCacheDirForRuntimeInfo()
   }
 }
 
@@ -141,213 +114,6 @@ function enableExtensionDeveloperMode(profilePath: string) {
   fs.writeFileSync(masterPreferencesPath, JSON.stringify(preferences, null, 2))
 }
 
-function fingerprintPayload(fingerprint: FingerprintConfig) {
-  const languages = [fingerprint.language, String(fingerprint.language || '').split('-')[0]].filter(Boolean)
-  return {
-    schemaVersion: 1,
-    userAgent: fingerprint.userAgent,
-    language: fingerprint.language,
-    languages,
-    platform: fingerprint.platform,
-    hardwareConcurrency: fingerprint.hardwareConcurrency || 8,
-    deviceMemory: fingerprint.deviceMemory || 8,
-    timezone: fingerprint.timezone,
-    webglVendor: fingerprint.webglVendor,
-    webglRenderer: fingerprint.webglRenderer,
-    canvasNoise: fingerprint.canvasNoise,
-    audioNoise: fingerprint.audioNoise,
-    viewport: fingerprint.viewport,
-    screen: fingerprint.screen,
-    deviceScaleFactor: fingerprint.deviceScaleFactor,
-    fonts: fingerprint.fonts,
-    webRtcPolicy: fingerprint.webRtcPolicy,
-    navigator: {
-      userAgent: fingerprint.userAgent,
-      language: fingerprint.language,
-      languages,
-      platform: fingerprint.platform,
-      hardwareConcurrency: fingerprint.hardwareConcurrency || 8,
-      deviceMemory: fingerprint.deviceMemory || 8,
-      maxTouchPoints: fingerprint.maxTouchPoints || 0,
-      doNotTrack: fingerprint.doNotTrack
-    },
-    locale: {
-      language: fingerprint.language,
-      languages,
-      timezone: fingerprint.timezone
-    },
-    webgl: {
-      vendor: fingerprint.webglVendor,
-      renderer: fingerprint.webglRenderer
-    },
-    noise: {
-      canvas: fingerprint.canvasNoise,
-      audio: fingerprint.audioNoise
-    }
-  }
-}
-
-function writeFingerprintPayload(profile: BrowserProfile) {
-  const configPath = path.join(profile.profilePath, 'fingerprint.json')
-  fs.writeFileSync(configPath, JSON.stringify(fingerprintPayload(profile.fingerprint), null, 2))
-  return configPath
-}
-
-function ensureFingerprintExtension(profile: BrowserProfile) {
-  const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')
-  fs.mkdirSync(extensionPath, { recursive: true })
-
-  const manifest = {
-    manifest_version: 3,
-    name: 'Auto Registry Fingerprint',
-    version: '1.0.0',
-    description: 'Applies per-profile browser fingerprint settings.',
-    content_scripts: [
-      {
-        matches: ['<all_urls>'],
-        js: ['content.js'],
-        run_at: 'document_start',
-        all_frames: true
-      }
-    ],
-    web_accessible_resources: [
-      {
-        resources: ['inject.js'],
-        matches: ['<all_urls>']
-      }
-    ]
-  }
-
-  const config = JSON.stringify(fingerprintPayload(profile.fingerprint))
-  const content = `
-const configTag = document.createElement('script');
-configTag.id = 'auto-registry-fingerprint-config';
-configTag.type = 'application/json';
-configTag.textContent = ${JSON.stringify(config)};
-(document.documentElement || document.head).appendChild(configTag);
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('inject.js');
-script.onload = () => script.remove();
-(document.documentElement || document.head).appendChild(script);
-`
-
-  const inject = `
-(() => {
-  const configNode = document.getElementById('auto-registry-fingerprint-config');
-  if (!configNode) return;
-  const payload = JSON.parse(configNode.textContent || '{}');
-  const nav = payload.navigator || {};
-  const locale = payload.locale || {};
-  const viewport = payload.viewport || {};
-  const screen = payload.screen || {};
-  const webgl = payload.webgl || {};
-  const noise = payload.noise || {};
-  configNode.remove();
-  const define = (target, key, value) => {
-    if (typeof value === 'undefined') return;
-    try { Object.defineProperty(target, key, { get: () => value, configurable: true }); } catch {}
-  };
-  define(Navigator.prototype, 'userAgent', nav.userAgent);
-  define(Navigator.prototype, 'appVersion', String(nav.userAgent || '').replace(/^Mozilla\\//, ''));
-  define(Navigator.prototype, 'language', nav.language);
-  define(Navigator.prototype, 'languages', nav.languages);
-  define(Navigator.prototype, 'platform', nav.platform);
-  define(Navigator.prototype, 'hardwareConcurrency', nav.hardwareConcurrency);
-  define(Navigator.prototype, 'deviceMemory', nav.deviceMemory);
-  define(Navigator.prototype, 'maxTouchPoints', nav.maxTouchPoints);
-  define(Navigator.prototype, 'doNotTrack', nav.doNotTrack);
-  define(Screen.prototype, 'colorDepth', screen.colorDepth);
-  define(Screen.prototype, 'pixelDepth', screen.pixelDepth);
-
-  const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
-  Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-    return { ...originalResolvedOptions.call(this), locale: locale.language, timeZone: locale.timezone };
-  };
-
-  const patchWebGL = (Ctor) => {
-    if (!Ctor?.prototype?.getParameter) return;
-    const original = Ctor.prototype.getParameter;
-    Ctor.prototype.getParameter = function(parameter) {
-      if (parameter === 37445) return webgl.vendor;
-      if (parameter === 37446) return webgl.renderer;
-      return original.call(this, parameter);
-    };
-  };
-  patchWebGL(window.WebGLRenderingContext);
-  patchWebGL(window.WebGL2RenderingContext);
-
-  const canvasNoise = Number(noise.canvas || 0);
-  const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-  HTMLCanvasElement.prototype.toDataURL = function(...args) {
-    try {
-      const context = this.getContext('2d');
-      if (context && canvasNoise) {
-        context.globalAlpha = Math.max(0.9999, 1 - canvasNoise);
-        context.fillStyle = 'rgba(1,1,1,0.001)';
-        context.fillRect(0, 0, 1, 1);
-      }
-    } catch {}
-    return originalToDataURL.apply(this, args);
-  };
-  const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-  CanvasRenderingContext2D.prototype.getImageData = function(...args) {
-    const data = originalGetImageData.apply(this, args);
-    if (canvasNoise && data.data.length >= 4) {
-      data.data[0] = (data.data[0] + 1) % 255;
-    }
-    return data;
-  };
-
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  const originalCreateAnalyser = AudioContextCtor?.prototype?.createAnalyser;
-  if (originalCreateAnalyser) {
-    AudioContextCtor.prototype.createAnalyser = function(...args) {
-      const analyser = originalCreateAnalyser.apply(this, args);
-      const originalGetFloatFrequencyData = analyser.getFloatFrequencyData.bind(analyser);
-      analyser.getFloatFrequencyData = (array) => {
-        originalGetFloatFrequencyData(array);
-        const audioNoise = Number(noise.audio || 0);
-        for (let i = 0; i < array.length; i += 16) array[i] += audioNoise;
-      };
-      return analyser;
-    };
-  }
-
-  const originalRTCPeerConnection = window.RTCPeerConnection;
-  if (originalRTCPeerConnection && payload.webRtcPolicy === 'disable-non-proxied-udp') {
-    window.RTCPeerConnection = function(configuration = {}, ...rest) {
-      return new originalRTCPeerConnection({ ...configuration, iceTransportPolicy: 'relay' }, ...rest);
-    };
-    window.RTCPeerConnection.prototype = originalRTCPeerConnection.prototype;
-  }
-
-  const fontSet = new Set(payload.fonts || []);
-  if (document.fonts?.check) {
-    const originalCheck = document.fonts.check.bind(document.fonts);
-    document.fonts.check = (font, text) => {
-      const quoted = String(font).match(/["']([^"']+)["']/)?.[1];
-      const family = quoted || String(font).split(',').pop()?.trim().split(' ').pop();
-      return family && fontSet.has(family) ? true : originalCheck(font, text);
-    };
-  }
-})();
-`
-
-  fs.writeFileSync(path.join(extensionPath, 'manifest.json'), JSON.stringify(manifest, null, 2))
-  fs.writeFileSync(path.join(extensionPath, 'content.js'), content)
-  fs.writeFileSync(path.join(extensionPath, 'inject.js'), inject)
-  return extensionPath
-}
-
-function assertLaunchableBrowser(browserPath: string) {
-  if (process.platform !== 'win32' && browserPath.toLowerCase().endsWith('.exe')) {
-    throw new Error(message(
-      `The configured browser is a Windows executable and cannot run on ${process.platform}: ${browserPath}`,
-      `当前配置的浏览器是 Windows 可执行文件，无法在 ${process.platform} 上运行：${browserPath}`
-    ))
-  }
-}
-
 function findManifestDir(root: string): string | undefined {
   const entries = fs.readdirSync(root, { withFileTypes: true })
   if (entries.some((entry) => entry.isFile() && entry.name === 'manifest.json')) {
@@ -373,7 +139,7 @@ async function importPluginZip() {
   if (result.canceled || !result.filePaths[0]) return undefined
 
   const zipPath = result.filePaths[0]
-  const pluginRoot = path.join(app.getPath('userData'), 'registry-data', 'plugins')
+  const pluginRoot = pluginsRoot()
   const tempDir = path.join(os.tmpdir(), `auto-registry-plugin-${Date.now()}`)
   fs.mkdirSync(tempDir, { recursive: true })
   fs.mkdirSync(pluginRoot, { recursive: true })
@@ -441,45 +207,15 @@ async function launchProfile(profile: BrowserProfile) {
     return
   }
 
-  const mode = fingerprintMode()
-  const fingerprintEnabled = mode !== 'off'
+  const selection = await selectKernel(profile)
+  assertLaunchableBrowser(selection.executable)
+
   const activePlugins = store.activePluginVersions(profile.enabledPluginIds)
-  const extensionPaths = [
-    ...(fingerprintEnabled ? [ensureFingerprintExtension(profile)] : []),
-    ...activePlugins.map((plugin) => plugin.path)
-  ].join(',')
+  const args = buildLaunchArgs(profile, selection, activePlugins.map((plugin) => plugin.path), proxyUrl(profile))
+
   enableExtensionDeveloperMode(profile.profilePath)
-  
-  const args = [
-    `--user-data-dir=${profile.profilePath}`,
-    `--proxy-server=${proxyUrl(profile)}`,
-    `--window-size=${profile.fingerprint.viewport.width},${profile.fingerprint.viewport.height}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-background-mode',
-    '--enable-extensions'
-  ]
 
-  if (fingerprintEnabled) {
-    const fingerprintConfigPath = writeFingerprintPayload(profile)
-    if (mode === 'itbrowser') {
-    args.push(`--itbrowser=${fingerprintConfigPath}`)
-    }
-
-    args.push(`--user-agent=${profile.fingerprint.userAgent}`)
-    args.push(`--lang=${profile.fingerprint.language}`)
-    args.push(`--force-webrtc-ip-handling-policy=${profile.fingerprint.webRtcPolicy === 'disable-non-proxied-udp' ? 'disable_non_proxied_udp' : 'default'}`)
-  }
-
-  if (extensionPaths) {
-    args.push(`--disable-extensions-except=${extensionPaths}`)
-    args.push(`--load-extension=${extensionPaths}`)
-  }
-  args.push(profile.startUrl)
-
-  const browserPath = await managedChromeExecutablePath()
-  assertLaunchableBrowser(browserPath)
-  const child = spawn(browserPath, args, {
+  const child = spawn(selection.executable, args, {
     detached: true,
     stdio: 'ignore'
   })
@@ -496,17 +232,39 @@ function stopProfile(profileId: string) {
   profileProcesses.delete(profileId)
 }
 
+function emitKernelProgress(progress: KernelInstallProgress) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('kernel:progress', progress)
+}
+
+function serializeError(error: unknown) {
+  if (error instanceof KernelMissingError) {
+    return error.toJSON()
+  }
+  if (error instanceof Error) {
+    return { message: error.message }
+  }
+  return { message: String(error) }
+}
+
 app.whenReady().then(async () => {
+  ensureDirs()
   store = new ProfileStore()
+
   ipcMain.handle('profiles:list', () => store.list())
   ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => store.upsert(draft))
   ipcMain.handle('profiles:remove', (_event, id: string) => store.remove(id))
-  ipcMain.handle('profiles:randomFingerprint', () => makeFingerprint())
+  ipcMain.handle('profiles:randomFingerprint', (_event, targetOs?: string) => makeFingerprint(undefined, targetOs as never))
   ipcMain.handle('profiles:status', () => runtimeStatus())
   ipcMain.handle('profiles:launch', async (_event, id: string) => {
     const profile = store.get(id)
     if (!profile) throw new Error('Profile not found')
-    await launchProfile(profile)
+    try {
+      await launchProfile(profile)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: serializeError(error) }
+    }
   })
   ipcMain.handle('profiles:stop', (_event, id: string) => stopProfile(id))
   ipcMain.handle('plugins:list', () => store.listPlugins())
@@ -514,6 +272,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('plugins:setActiveVersion', (_event, pluginId: string, versionId: string) => store.setActivePluginVersion(pluginId, versionId))
   ipcMain.handle('plugins:remove', (_event, pluginId: string) => store.removePlugin(pluginId))
   ipcMain.handle('runtime:info', () => runtimeInfo())
+
+  ipcMain.handle('kernel:status', () => kernelStatusMap())
+  ipcMain.handle('kernel:install', async (_event, kernel: KernelType) => {
+    if (isInstalling(kernel)) return { ok: true, alreadyRunning: true }
+    try {
+      await installKernel(kernel, emitKernelProgress)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: serializeError(error) }
+    }
+  })
+  ipcMain.handle('kernel:cancel', (_event, kernel: KernelType) => {
+    cancelInstall(kernel)
+    return { ok: true }
+  })
 
   await createMainWindow()
 })

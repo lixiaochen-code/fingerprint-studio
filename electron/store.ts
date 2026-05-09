@@ -1,7 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
-import type { BrowserPlugin, BrowserProfile, FingerprintConfig, PluginVersion, ProfileDraft, ProxyConfig } from './types'
+import type { BrowserPlugin, BrowserProfile, PluginVersion, ProfileDraft, ProxyConfig } from './types'
+import { makeFingerprint } from './fingerprint'
+import { dataRoot, profilesRoot } from './paths'
 
 const DEFAULT_PROXY: ProxyConfig = {
   host: '127.0.0.1',
@@ -16,41 +18,6 @@ function message(en: string, zh: string) {
   return systemLocale() === 'zh' ? zh : en
 }
 
-const languages = ['zh-CN', 'en-US', 'en-GB', 'ja-JP', 'de-DE', 'fr-FR']
-const timezones = ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo']
-const viewports = [
-  { width: 1440, height: 900 },
-  { width: 1536, height: 864 },
-  { width: 1600, height: 900 },
-  { width: 1920, height: 1080 },
-  { width: 1366, height: 768 }
-]
-const fontSets = [
-  ['Helvetica Neue', 'Arial', 'Times New Roman', 'Courier New', 'Verdana'],
-  ['PingFang SC', 'Hiragino Sans', 'Helvetica Neue', 'Arial', 'Songti SC'],
-  ['Segoe UI', 'Calibri', 'Cambria', 'Arial', 'Verdana'],
-  ['Ubuntu', 'DejaVu Sans', 'Liberation Sans', 'Arial', 'Noto Sans']
-]
-const macRenderers = [
-  ['Apple Inc.', 'Apple M1'],
-  ['Apple Inc.', 'Apple M2'],
-  ['Apple Inc.', 'Apple M3'],
-  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)']
-]
-const windowsRenderers = [
-  ['Google Inc. (Intel)', 'ANGLE (Intel, Intel(R) Iris(TM) Plus Graphics, OpenGL 4.1)'],
-  ['Google Inc. (NVIDIA)', 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1660, OpenGL 4.1)'],
-  ['Google Inc. (AMD)', 'ANGLE (AMD, AMD Radeon RX 580, Direct3D11 vs_5_0 ps_5_0)']
-]
-const linuxRenderers = [
-  ['Google Inc. (Intel)', 'ANGLE (Intel, Mesa Intel(R) UHD Graphics, OpenGL 4.6)'],
-  ['Google Inc. (AMD)', 'ANGLE (AMD, AMD Radeon Graphics, OpenGL 4.6)']
-]
-
-function pick<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)]
-}
-
 function id() {
   return `env_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -63,40 +30,6 @@ function versionId() {
   return `ver_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-function chromeVersion() {
-  const major = 120 + Math.floor(Math.random() * 12)
-  return `${major}.0.${Math.floor(1000 + Math.random() * 7999)}.${Math.floor(10 + Math.random() * 89)}`
-}
-
-function hostFingerprintPlatform() {
-  if (process.platform === 'win32') {
-    return {
-      platform: 'Win32',
-      osToken: 'Windows NT 10.0; Win64; x64',
-      fonts: fontSets[2],
-      renderers: windowsRenderers
-    }
-  }
-  if (process.platform === 'linux') {
-    return {
-      platform: 'Linux x86_64',
-      osToken: 'X11; Linux x86_64',
-      fonts: fontSets[3],
-      renderers: linuxRenderers
-    }
-  }
-  return {
-    platform: 'MacIntel',
-    osToken: 'Macintosh; Intel Mac OS X 10_15_7',
-    fonts: pick([fontSets[0], fontSets[1]]),
-    renderers: macRenderers
-  }
-}
-
-function userAgentFor(osToken: string) {
-  return `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion()} Safari/537.36`
-}
-
 function normalizeUrl(url?: string) {
   const value = url?.trim()
   if (!value) return 'https://www.google.com'
@@ -104,39 +37,7 @@ function normalizeUrl(url?: string) {
   return `https://${value}`
 }
 
-export function makeFingerprint(partial?: Partial<FingerprintConfig>): FingerprintConfig {
-  const host = hostFingerprintPlatform()
-  const viewport = partial?.viewport ?? pick(viewports)
-  const acceptsExistingHostFingerprint = partial?.platform === host.platform
-  const [webglVendor, webglRenderer] = acceptsExistingHostFingerprint && partial?.webglVendor && partial?.webglRenderer
-    ? [partial.webglVendor, partial.webglRenderer]
-    : pick(host.renderers)
-
-  return {
-    userAgent: acceptsExistingHostFingerprint && partial?.userAgent && partial.userAgent.includes(host.osToken) ? partial.userAgent : userAgentFor(host.osToken),
-    language: partial?.language ?? pick(languages),
-    timezone: partial?.timezone ?? pick(timezones),
-    viewport,
-    screen: partial?.screen ?? {
-      availWidth: viewport.width,
-      availHeight: viewport.height - pick([24, 40, 72]),
-      colorDepth: pick([24, 30]),
-      pixelDepth: pick([24, 30])
-    },
-    platform: host.platform,
-    hardwareConcurrency: partial?.hardwareConcurrency ?? pick([4, 6, 8, 10, 12]),
-    deviceMemory: partial?.deviceMemory ?? pick([4, 8, 16]),
-    deviceScaleFactor: partial?.deviceScaleFactor ?? pick([1, 1.25, 1.5, 2]),
-    maxTouchPoints: partial?.maxTouchPoints ?? pick([0, 0, 0, 1, 5]),
-    doNotTrack: partial?.doNotTrack ?? pick(['1', '0', 'unspecified']),
-    webRtcPolicy: partial?.webRtcPolicy ?? 'disable-non-proxied-udp',
-    canvasNoise: partial?.canvasNoise ?? Number((Math.random() * 0.00001).toFixed(8)),
-    audioNoise: partial?.audioNoise ?? Number((Math.random() * 0.00001).toFixed(8)),
-    webglVendor,
-    webglRenderer,
-    fonts: acceptsExistingHostFingerprint && partial?.fonts?.length ? partial.fonts : host.fonts
-  }
-}
+export { makeFingerprint }
 
 export class ProfileStore {
   private readonly root: string
@@ -146,10 +47,11 @@ export class ProfileStore {
   private plugins: BrowserPlugin[] = []
 
   constructor() {
-    this.root = path.join(app.getPath('userData'), 'registry-data')
+    this.root = dataRoot()
     this.profilesFile = path.join(this.root, 'profiles.json')
     this.pluginsFile = path.join(this.root, 'plugins.json')
     fs.mkdirSync(this.root, { recursive: true })
+    fs.mkdirSync(profilesRoot(), { recursive: true })
     this.load()
   }
 
@@ -180,8 +82,8 @@ export class ProfileStore {
       startUrl: normalizeUrl(draft.startUrl || existing?.startUrl),
       enabledPluginIds: draft.enabledPluginIds ?? existing?.enabledPluginIds ?? [],
       proxy,
-      fingerprint: makeFingerprint({ ...existing?.fingerprint, ...draft.fingerprint }),
-      profilePath: existing?.profilePath || path.join(this.root, 'profiles', profileId),
+      fingerprint: makeFingerprint({ ...existing?.fingerprint, ...draft.fingerprint }, draft.targetOs),
+      profilePath: existing?.profilePath || path.join(profilesRoot(), profileId),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       lastOpenedAt: existing?.lastOpenedAt
