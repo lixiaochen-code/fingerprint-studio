@@ -27,7 +27,8 @@ const labels = {
     delete: 'Delete',
     select: 'Select',
     fingerprintHost: 'Host: {{host}} · Active kernel: {{kernel}}',
-    itbrowserUnsupported: 'itbrowser is Windows-only.'
+    itbrowserUnsupported: 'itbrowser is Windows-only.',
+    cloakUnsupported: 'CloakBrowser does not publish a macOS binary yet.'
   },
   zh: {
     title: '设置',
@@ -48,7 +49,8 @@ const labels = {
     delete: '删除',
     select: '选择',
     fingerprintHost: '宿主：{{host}} · 当前内核：{{kernel}}',
-    itbrowserUnsupported: 'itbrowser 仅 Windows 可用。'
+    itbrowserUnsupported: 'itbrowser 仅 Windows 可用。',
+    cloakUnsupported: 'CloakBrowser 暂未提供 macOS 版本。'
   }
 } as const
 
@@ -90,7 +92,7 @@ export function SettingsView({ runtimeInfo, plugins, locale, onBack, onInstallKe
     }
   }
 
-  const kernels: KernelType[] = ['chromium', 'itbrowser']
+  const kernels: KernelType[] = ['chromium', 'cloak', 'itbrowser']
 
   return (
     <main className="p-6 space-y-6 max-w-[1200px] mx-auto">
@@ -111,7 +113,8 @@ export function SettingsView({ runtimeInfo, plugins, locale, onBack, onInstallKe
         <div className="grid gap-3 md:grid-cols-2">
           {kernels.map((kernel) => {
             const status = runtimeInfo?.kernels[kernel]
-            const unsupported = kernel === 'itbrowser' && !runtimeInfo?.itbrowserSupported
+            const unsupported = (kernel === 'itbrowser' && !runtimeInfo?.itbrowserSupported)
+              || (kernel === 'cloak' && !runtimeInfo?.cloakSupported)
             return (
               <Card key={kernel} className="border border-border bg-secondary p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -122,7 +125,8 @@ export function SettingsView({ runtimeInfo, plugins, locale, onBack, onInstallKe
                       {status?.version ? ` · ${status.version}` : ''}
                       {status?.sizeMB ? ` · ${status.sizeMB} MB` : ''}
                     </div>
-                    {unsupported && <p className="mt-1 text-[11px] text-amber-500">{t.itbrowserUnsupported}</p>}
+                    {unsupported && kernel === 'itbrowser' && <p className="mt-1 text-[11px] text-amber-500">{t.itbrowserUnsupported}</p>}
+                    {unsupported && kernel === 'cloak' && <p className="mt-1 text-[11px] text-amber-500">{t.cloakUnsupported}</p>}
                     {status?.path && (
                       <p className="mt-2 break-all font-mono text-[10px] text-muted-foreground">{status.path}</p>
                     )}

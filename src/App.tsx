@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Toaster, toast } from 'sonner'
 import {
   Alert,
   AlertDescription,
@@ -25,7 +26,10 @@ import {
   X,
   ShieldCheck,
   AlertTriangle,
-  Info
+  Info,
+  Sun,
+  Moon,
+  Monitor
 } from 'lucide-react'
 import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, TargetOs } from '../electron/types'
 import { KernelSetup } from './components/KernelSetup'
@@ -37,6 +41,7 @@ import { interpolate } from './lib/i18n'
 import './styles.css'
 
 type Locale = 'en' | 'zh'
+type ThemePref = 'light' | 'dark' | 'system'
 
 type Translations = {
   appName: string
@@ -82,9 +87,14 @@ type Translations = {
   osLinux: string
   osRandom: string
   settings: string
+  theme: string
+  themeLight: string
+  themeDark: string
+  themeSystem: string
   fingerprintModeHint: string
   fingerprintModes: {
     extension: { title: string; description: string }
+    cloak: { title: string; description: string }
     itbrowser: { title: string; description: string }
     off: { title: string; description: string }
   }
@@ -136,15 +146,23 @@ const translations: Record<Locale, Translations> = {
     osLinux: 'LINUX',
     osRandom: 'RANDOM',
     settings: 'Settings',
+    theme: 'Theme',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    themeSystem: 'System',
     fingerprintModeHint: 'How browser fingerprint is being spoofed for every profile.',
     fingerprintModes: {
       extension: {
         title: 'Extension mode',
-        description: 'A local Chrome extension rewrites navigator, WebGL, Canvas, AudioContext, fonts, etc. at the JavaScript layer. Works on every host platform with vanilla Chromium. Medium strength — deep stack details may still leak.'
+        description: 'A local Chrome extension rewrites navigator, WebGL, Canvas, AudioContext, fonts, etc. at the JavaScript layer. Works on every host platform with vanilla Chromium. Medium strength — deep stack details may still leak. Used as fallback when no source-level kernel is available.'
+      },
+      cloak: {
+        title: 'Cloak mode',
+        description: 'Uses CloakBrowser — a custom-built Chromium with 49+ source-level C++ patches covering canvas, WebGL, audio, fonts, GPU, screen, WebRTC, and automation signals. Strongest cross-platform fingerprint coverage. Linux/Windows only (no macOS upstream binary).'
       },
       itbrowser: {
         title: 'itbrowser mode',
-        description: 'Uses the patched itbrowser Chromium kernel via --itbrowser=fingerprint.json so the spoofing happens inside the browser engine itself. Strongest fingerprint coverage but Windows-only.'
+        description: 'Uses the patched itbrowser Chromium kernel via --itbrowser=fingerprint.json so the spoofing happens inside the browser engine itself. Strong fingerprint coverage but Windows-only.'
       },
       off: {
         title: 'Spoofing disabled',
@@ -204,15 +222,23 @@ const translations: Record<Locale, Translations> = {
     osLinux: 'LINUX',
     osRandom: '随机',
     settings: '设置',
+    theme: '主题',
+    themeLight: '浅色',
+    themeDark: '深色',
+    themeSystem: '跟随系统',
     fingerprintModeHint: '当前为每个环境改写浏览器指纹的方式。',
     fingerprintModes: {
       extension: {
         title: '扩展模式',
-        description: '通过加载本地 Chrome 扩展，在 JavaScript 层面改写 navigator、WebGL、Canvas、AudioContext、字体等指纹面。三平台通用，使用标准 Chromium，强度中等——深层栈信息仍可能泄露。'
+        description: '通过加载本地 Chrome 扩展，在 JavaScript 层面改写 navigator、WebGL、Canvas、AudioContext、字体等指纹面。三平台通用，强度中等——深层栈信息仍可能泄露。仅在内核级方案不可用时作为兜底。'
+      },
+      cloak: {
+        title: 'Cloak 模式',
+        description: '使用 CloakBrowser —— 自定义编译的 Chromium，包含 49+ 项 C++ 源码级补丁，覆盖 canvas、WebGL、audio、字体、GPU、screen、WebRTC、自动化信号等。跨平台强度最高。仅 Linux/Windows 提供二进制（macOS 上游未发布）。'
       },
       itbrowser: {
         title: 'itbrowser 模式',
-        description: '使用打过补丁的 itbrowser Chromium 内核，通过 --itbrowser=fingerprint.json 在内核层面改写指纹。覆盖最全面，但仅 Windows 可用。'
+        description: '使用打过补丁的 itbrowser Chromium 内核，通过 --itbrowser=fingerprint.json 在内核层面改写指纹。强度高但仅 Windows 可用。'
       },
       off: {
         title: '未启用',
@@ -236,6 +262,17 @@ function initialLocale(): Locale {
   return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
 }
 
+function initialTheme(): ThemePref {
+  const stored = window.localStorage.getItem('auto-registry-theme')
+  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
+  return 'system'
+}
+
+function resolveTheme(pref: ThemePref): 'light' | 'dark' {
+  if (pref !== 'system') return pref
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 function platformLabel(platform: string, locale: Locale) {
   const names = translations[locale].platformNames as Record<string, string>
   return names[platform] || platform.toUpperCase()
@@ -252,6 +289,7 @@ function targetOsLabel(target: TargetOs, locale: Locale) {
 function activeKernelLabel(runtime: RuntimeInfo | undefined) {
   if (!runtime) return '—'
   if (runtime.hostOs === 'win32' && runtime.kernels.itbrowser.installed) return 'ITBROWSER'
+  if (runtime.cloakSupported && runtime.kernels.cloak.installed) return 'CLOAK'
   if (runtime.kernels.chromium.installed) return 'CHROMIUM'
   return 'NONE'
 }
@@ -298,8 +336,24 @@ export function App() {
   const [deleteIds, setDeleteIds] = useState<string[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [setupKernel, setSetupKernel] = useState<KernelType>()
-  const [notice, setNotice] = useState<string>()
+  const [themePref, setThemePref] = useState<ThemePref>(initialTheme)
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => resolveTheme(initialTheme()))
   const t = translations[locale]
+
+  useEffect(() => {
+    const apply = () => setResolvedTheme(resolveTheme(themePref))
+    apply()
+    window.localStorage.setItem('auto-registry-theme', themePref)
+    if (themePref === 'system') {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)')
+      mql.addEventListener('change', apply)
+      return () => mql.removeEventListener('change', apply)
+    }
+  }, [themePref])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme
+  }, [resolvedTheme])
 
   async function load() {
     const [nextProfiles, nextPlugins, statuses, nextRuntimeInfo] = await Promise.all([
@@ -383,7 +437,7 @@ export function App() {
         if (result.error?.code === 'KERNEL_MISSING' && result.error.kernel) {
           setSetupKernel(result.error.kernel)
         } else {
-          setNotice(interpolate(t.actionFailed, { action: t.run, message: result.error?.message || 'unknown' }))
+          toast.error(interpolate(t.actionFailed, { action: t.run, message: result.error?.message || 'unknown' }))
         }
       }
       await load()
@@ -415,12 +469,16 @@ export function App() {
   async function importPluginFromForm() {
     try {
       const plugin = await window.registry.plugins.importZip()
-      setNotice(plugin ? interpolate(t.importSuccess, { name: plugin.name }) : t.importCanceled)
+      if (plugin) {
+        toast.success(interpolate(t.importSuccess, { name: plugin.name }))
+      } else {
+        toast(t.importCanceled)
+      }
       await load()
       return plugin
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setNotice(interpolate(t.actionFailed, { action: 'IMPORT', message }))
+      toast.error(interpolate(t.actionFailed, { action: 'IMPORT', message }))
       throw error
     }
   }
@@ -428,11 +486,11 @@ export function App() {
   async function duplicateProfile(profile: BrowserProfile) {
     try {
       const copy = await window.registry.profiles.duplicate(profile.id)
-      setNotice(interpolate(t.duplicateSuccess, { name: copy.name }))
+      toast.success(interpolate(t.duplicateSuccess, { name: copy.name }))
       await load()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setNotice(interpolate(t.actionFailed, { action: t.duplicate, message }))
+      toast.error(interpolate(t.actionFailed, { action: t.duplicate, message }))
     }
   }
 
@@ -444,7 +502,7 @@ export function App() {
       for (const id of ids) next.delete(id)
       return next
     })
-    setNotice(interpolate(t.deleteSuccess, { count: String(ids.length) }))
+    toast.success(interpolate(t.deleteSuccess, { count: String(ids.length) }))
     await load()
   }
 
@@ -468,6 +526,8 @@ export function App() {
           pluginsCount={plugins.length}
           runningCount={runningIds.size}
           runtime={runtimeInfo}
+          themePref={themePref}
+          onThemeChange={setThemePref}
           onAdd={() => setFormDialog({ open: true, mode: 'create' })}
           onSettings={() => setView('settings')}
           onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
@@ -491,9 +551,11 @@ export function App() {
           status={setupKernel && runtimeInfo ? runtimeInfo.kernels[setupKernel] : undefined}
           locale={locale}
           hostSupportsItbrowser={runtimeInfo?.itbrowserSupported || false}
+          hostSupportsCloak={runtimeInfo?.cloakSupported || false}
           onClose={() => setSetupKernel(undefined)}
           onInstalled={() => void load()}
         />
+        <Toaster theme={resolvedTheme} position="top-right" richColors closeButton />
       </div>
     )
   }
@@ -507,6 +569,8 @@ export function App() {
         pluginsCount={plugins.length}
         runningCount={runningIds.size}
         runtime={runtimeInfo}
+        themePref={themePref}
+        onThemeChange={setThemePref}
         onAdd={() => setFormDialog({ open: true, mode: 'create' })}
         onSettings={() => setView('settings')}
         onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
@@ -514,13 +578,6 @@ export function App() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden p-6 gap-4">
-          {notice && (
-            <Alert className="border-none bg-muted/50">
-              <AlertTitle className="text-[11px] tracking-[0.1em] uppercase">{t.status}</AlertTitle>
-              <AlertDescription>{notice}</AlertDescription>
-            </Alert>
-          )}
-
           <div className="flex items-center gap-3">
             <FingerprintBadge runtime={runtimeInfo} t={t} />
             <div className="relative max-w-md flex-1">
@@ -538,30 +595,49 @@ export function App() {
             </Button>
           </div>
 
-          {selectedIds.size > 0 && (
-            <div className="flex items-center justify-between border border-primary/40 bg-primary/10 px-4 py-2">
-              <div className="flex items-center gap-3 text-xs">
-                <Checkbox checked={true} onChange={() => setSelectedIds(new Set())} />
-                <span className="font-display font-bold uppercase tracking-wider">
-                  {interpolate(t.selected, { count: String(selectedIds.size) })}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => setDetailsIds(Array.from(selectedIds))}>
-                  <Eye className="h-3 w-3" />
-                  {t.details}
-                </Button>
-                <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteIds(Array.from(selectedIds))}>
-                  <Trash2 className="h-3 w-3" />
-                  {t.delete}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
-                  <X className="h-3 w-3 mr-1" />
-                  {t.clear}
-                </Button>
-              </div>
+          <div className={`flex items-center justify-between border px-4 py-2 transition-colors ${selectedIds.size > 0 ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'}`}>
+            <div className="flex items-center gap-3 text-xs">
+              <Checkbox
+                checked={selectedIds.size > 0}
+                onChange={() => setSelectedIds(new Set())}
+                disabled={selectedIds.size === 0}
+              />
+              <span className={`font-display font-bold uppercase tracking-wider ${selectedIds.size > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                {interpolate(t.selected, { count: String(selectedIds.size) })}
+              </span>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={selectedIds.size === 0}
+                onClick={() => setDetailsIds(Array.from(selectedIds))}
+              >
+                <Eye className="h-3 w-3" />
+                {t.details}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-2"
+                disabled={selectedIds.size === 0}
+                onClick={() => setDeleteIds(Array.from(selectedIds))}
+              >
+                <Trash2 className="h-3 w-3" />
+                {t.delete}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={selectedIds.size === 0}
+                onClick={() => setSelectedIds(new Set())}
+              >
+                <X className="h-3 w-3 mr-1" />
+                {t.clear}
+              </Button>
+            </div>
+          </div>
 
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border border-border bg-secondary">
             <div className="flex-1 overflow-auto">
@@ -716,8 +792,19 @@ export function App() {
         status={setupKernel && runtimeInfo ? runtimeInfo.kernels[setupKernel] : undefined}
         locale={locale}
         hostSupportsItbrowser={runtimeInfo?.itbrowserSupported || false}
+        hostSupportsCloak={runtimeInfo?.cloakSupported || false}
         onClose={() => setSetupKernel(undefined)}
         onInstalled={() => void load()}
+      />
+
+      <Toaster
+        theme={resolvedTheme}
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{
+          style: { fontFamily: 'var(--font-display)' }
+        }}
       />
     </div>
   )
@@ -730,7 +817,7 @@ function FingerprintBadge({ runtime, t }: { runtime?: RuntimeInfo; t: Translatio
   const title = enabled
     ? interpolate(t.riskTitle, { mode: runtime?.fingerprintMode?.toUpperCase() || '—' })
     : t.secureTitle
-  const modeKey = (runtime?.fingerprintMode || 'off') as 'extension' | 'itbrowser' | 'off'
+  const modeKey = (runtime?.fingerprintMode || 'off') as 'extension' | 'cloak' | 'itbrowser' | 'off'
   const detail = t.fingerprintModes[modeKey]
   return (
     <Tooltip
@@ -758,6 +845,8 @@ function Header({
   pluginsCount,
   runningCount,
   runtime,
+  themePref,
+  onThemeChange,
   onAdd,
   onSettings,
   onLocaleToggle,
@@ -769,11 +858,14 @@ function Header({
   pluginsCount: number
   runningCount: number
   runtime?: RuntimeInfo
+  themePref: ThemePref
+  onThemeChange: (pref: ThemePref) => void
   onAdd: () => void
   onSettings: () => void
   onLocaleToggle: () => void
   isSettings?: boolean
 }) {
+  const ThemeIcon = themePref === 'light' ? Sun : themePref === 'dark' ? Moon : Monitor
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between px-6">
@@ -794,15 +886,15 @@ function Header({
                 content={
                   <div className="space-y-1">
                     <div className="font-display text-[11px] font-bold uppercase tracking-wider text-primary">
-                      {t.fingerprintModes[(runtime?.fingerprintMode || 'off') as 'extension' | 'itbrowser' | 'off'].title}
+                      {t.fingerprintModes[(runtime?.fingerprintMode || 'off') as 'extension' | 'cloak' | 'itbrowser' | 'off'].title}
                     </div>
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      {t.fingerprintModes[(runtime?.fingerprintMode || 'off') as 'extension' | 'itbrowser' | 'off'].description}
+                      {t.fingerprintModes[(runtime?.fingerprintMode || 'off') as 'extension' | 'cloak' | 'itbrowser' | 'off'].description}
                     </p>
                   </div>
                 }
               >
-                <span className={`inline-flex cursor-help items-center gap-1 ${runtime?.fingerprintSpoofingEnabled ? 'text-amber-400' : 'text-emerald-400'}`}>
+                <span className={`inline-flex cursor-help items-center gap-1 ${runtime?.fingerprintSpoofingEnabled ? 'text-amber-500' : 'text-emerald-500'}`}>
                   MODE:{runtime?.fingerprintMode?.toUpperCase() || '—'}
                   <Info className="h-3 w-3 opacity-60" />
                 </span>
@@ -826,6 +918,18 @@ function Header({
             <Languages className="h-4 w-4" />
             {t.languageSwitch}
           </Button>
+          <DropdownMenu
+            trigger={
+              <Button variant="ghost" size="sm" className="h-9 w-9 p-0" title={t.theme}>
+                <ThemeIcon className="h-4 w-4" />
+              </Button>
+            }
+            items={[
+              { label: t.themeLight, icon: <Sun className="h-3 w-3" />, onClick: () => onThemeChange('light') },
+              { label: t.themeDark, icon: <Moon className="h-3 w-3" />, onClick: () => onThemeChange('dark') },
+              { label: t.themeSystem, icon: <Monitor className="h-3 w-3" />, onClick: () => onThemeChange('system') }
+            ]}
+          />
           {!isSettings && (
             <Button size="sm" className="gap-2" onClick={onAdd}>
               <Plus className="h-4 w-4" />

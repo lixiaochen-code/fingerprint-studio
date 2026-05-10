@@ -6,31 +6,76 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --font-display: "Space Grotesk", sans-serif;
 
-  --color-background: #0a0a0a;
-  --color-foreground: #e5e2e1;
-  
-  --color-primary: #00ff9d;
-  --color-primary-foreground: #0a0a0a;
-  
-  --color-secondary: #131313;
-  --color-secondary-foreground: #e5e2e1;
-  
-  --color-accent: #00e0ff;
-  --color-accent-foreground: #0a0a0a;
-  
-  --color-destructive: #ff4d4f;
-  --color-destructive-foreground: #ffffff;
-  
-  --color-muted: #1a1a1a;
-  --color-muted-foreground: #849587;
-  
-  --color-border: #2a2a2a;
-  --color-input: #131313;
-  --color-ring: #00ff9d;
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-fg);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-fg);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-fg);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-fg);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   --radius-lg: 0px;
   --radius-md: 0px;
   --radius-sm: 0px;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --fg: #e5e2e1;
+  --primary: #00ff9d;
+  --primary-fg: #0a0a0a;
+  --secondary: #131313;
+  --secondary-fg: #e5e2e1;
+  --accent: #00e0ff;
+  --accent-fg: #0a0a0a;
+  --destructive: #ff4d4f;
+  --destructive-fg: #ffffff;
+  --muted: #1a1a1a;
+  --muted-fg: #849587;
+  --border: #2a2a2a;
+  --input: #131313;
+  --ring: #00ff9d;
+
+  --scrollbar-track: #0a0a0a;
+  --scrollbar-thumb: #2a2a2a;
+  --scrollbar-thumb-hover: #00ff9d;
+}
+
+:root[data-theme="light"] {
+  --bg: #fafafa;
+  --fg: #0f1115;
+  --primary: #00a86b;
+  --primary-fg: #ffffff;
+  --secondary: #ffffff;
+  --secondary-fg: #0f1115;
+  --accent: #0891b2;
+  --accent-fg: #ffffff;
+  --destructive: #dc2626;
+  --destructive-fg: #ffffff;
+  --muted: #f1f3f5;
+  --muted-fg: #5b6471;
+  --border: #e3e6ea;
+  --input: #ffffff;
+  --ring: #00a86b;
+
+  --scrollbar-track: #f1f3f5;
+  --scrollbar-thumb: #c4cad1;
+  --scrollbar-thumb-hover: #00a86b;
 }
 
 @layer base {
@@ -54,20 +99,19 @@
   font-size: 18px;
 }
 
-/* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0a0a0a;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
+  background: var(--scrollbar-thumb);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #00ff9d;
+  background: var(--scrollbar-thumb-hover);
 }

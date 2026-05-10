@@ -39,10 +39,7 @@ export function DropdownMenu({ trigger, items, align = 'end', side = 'bottom' }:
               <DropdownMenuPrimitive.Item
                 key={index}
                 disabled={item.disabled}
-                onSelect={(event) => {
-                  event.preventDefault()
-                  item.onClick()
-                }}
+                onSelect={() => item.onClick()}
                 className={cn(
                   'flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors outline-none',
                   item.variant === 'destructive'

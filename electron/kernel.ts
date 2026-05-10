@@ -2,8 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { Browser, getInstalledBrowsers, getVersionComparator } from '@puppeteer/browsers'
 import type { BrowserProfile, HostOs, KernelStatus, KernelStatusMap, KernelType, TargetOs } from './types'
-import { ensureFingerprintExtension, hostOs, writeFingerprintPayload } from './fingerprint'
-import { browsersRoot, chromiumCacheDir, configuredBrowserPath, itbrowserRoot, legacyBrowsersDir } from './paths'
+import { ensureFingerprintExtension, fingerprintSeed, hostOs, writeFingerprintPayload } from './fingerprint'
+import { browsersRoot, chromiumCacheDir, cloakRoot, configuredBrowserPath, itbrowserRoot, legacyBrowsersDir } from './paths'
 
 export class KernelMissingError extends Error {
   readonly code = 'KERNEL_MISSING'
@@ -98,9 +98,48 @@ function itbrowserStatus(): KernelStatus {
   }
 }
 
+export function cloakSupported(host: HostOs = hostOs()) {
+  return host === 'linux' || host === 'win32'
+}
+
+function cloakExecutableCandidates(): string[] {
+  const root = cloakRoot()
+  const host = hostOs()
+  const exeName = host === 'win32' ? 'chrome.exe' : 'chrome'
+  return [
+    path.join(root, 'cloakbrowser', exeName),
+    path.join(root, 'cloakbrowser', 'chrome'),
+    path.join(root, 'cloakbrowser', exeName.replace('chrome', 'cloak-chromium')),
+    path.join(root, exeName),
+    path.join(root, 'chrome')
+  ]
+}
+
+function cloakExecutable() {
+  return cloakExecutableCandidates().find((candidate) => fs.existsSync(candidate))
+}
+
+function cloakStatus(): KernelStatus {
+  const exe = cloakExecutable()
+  if (!exe) return { type: 'cloak', installed: false }
+  let version: string | undefined
+  try {
+    const versionFile = path.join(cloakRoot(), 'VERSION')
+    if (fs.existsSync(versionFile)) version = fs.readFileSync(versionFile, 'utf8').trim()
+  } catch {}
+  return {
+    type: 'cloak',
+    installed: true,
+    path: exe,
+    version,
+    sizeMB: dirSizeMB(path.dirname(exe))
+  }
+}
+
 export async function kernelStatusMap(): Promise<KernelStatusMap> {
   return {
     chromium: await chromiumStatus(),
+    cloak: cloakStatus(),
     itbrowser: itbrowserStatus()
   }
 }
@@ -112,7 +151,7 @@ export function itbrowserSupported(host: HostOs = hostOs()) {
 export type KernelSelection = {
   type: KernelType
   executable: string
-  mode: 'native' | 'extension'
+  mode: 'native' | 'cloak' | 'extension'
 }
 
 export async function selectKernel(profile: BrowserProfile): Promise<KernelSelection> {
@@ -124,11 +163,15 @@ export async function selectKernel(profile: BrowserProfile): Promise<KernelSelec
     return { type: 'itbrowser', executable: status.itbrowser.path, mode: 'native' }
   }
 
+  if (cloakSupported(host) && status.cloak.installed && status.cloak.path) {
+    return { type: 'cloak', executable: status.cloak.path, mode: 'cloak' }
+  }
+
   if (status.chromium.installed && status.chromium.path) {
     return { type: 'chromium', executable: status.chromium.path, mode: 'extension' }
   }
 
-  throw new KernelMissingError('chromium', 'Chromium kernel is not installed')
+  throw new KernelMissingError(cloakSupported(host) ? 'cloak' : 'chromium', 'No usable browser kernel is installed')
 }
 
 export function buildLaunchArgs(profile: BrowserProfile, selection: KernelSelection, extensionPaths: string[], proxyUrl: string) {
@@ -145,6 +188,13 @@ export function buildLaunchArgs(profile: BrowserProfile, selection: KernelSelect
   if (selection.mode === 'native' && selection.type === 'itbrowser') {
     const fingerprintConfigPath = writeFingerprintPayload(profile)
     args.push(`--itbrowser=${fingerprintConfigPath}`)
+  }
+
+  if (selection.mode === 'cloak') {
+    args.push(`--fingerprint=${fingerprintSeed(profile.id)}`)
+    args.push('--fingerprint-webrtc-ip=auto')
+    args.push(`--timezone=${profile.fingerprint.timezone}`)
+    args.push(`--lang=${profile.fingerprint.language}`)
   }
 
   args.push(`--user-agent=${profile.fingerprint.userAgent}`)

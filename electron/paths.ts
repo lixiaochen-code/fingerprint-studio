@@ -22,12 +22,16 @@ export function chromiumCacheDir() {
   return path.join(browsersRoot(), 'chromium')
 }
 
+export function cloakRoot() {
+  return path.join(browsersRoot(), 'cloak')
+}
+
 export function itbrowserRoot() {
   return path.join(browsersRoot(), 'itbrowser')
 }
 
 export function ensureDirs() {
-  for (const dir of [dataRoot(), profilesRoot(), pluginsRoot(), browsersRoot(), chromiumCacheDir(), itbrowserRoot()]) {
+  for (const dir of [dataRoot(), profilesRoot(), pluginsRoot(), browsersRoot(), chromiumCacheDir(), cloakRoot(), itbrowserRoot()]) {
     fs.mkdirSync(dir, { recursive: true })
   }
 }

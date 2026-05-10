@@ -1,15 +1,22 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import https from 'node:https'
+import os from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { URL } from 'node:url'
 import { install, Browser } from '@puppeteer/browsers'
 import { extractFull } from 'node-7z'
 import sevenBin from '7zip-bin'
 import type { KernelInstallProgress, KernelType } from './types'
-import { chromiumCacheDir, itbrowserRoot } from './paths'
+import { chromiumCacheDir, cloakRoot, itbrowserRoot } from './paths'
+import { hostOs } from './fingerprint'
+
+const execFileAsync = promisify(execFile)
 
 const ITBROWSER_RELEASE = 'https://github.com/itbrowser-net/undetectable-fingerprint-browser/releases/download/v1.0.1/finngerprints-browser-v1.0.1.7z'
 const CHROMIUM_BUILD_ID = '1627652'
+const CLOAK_RELEASE_TAG = 'chromium-v146.0.7680.177.4'
 
 export type ProgressListener = (progress: KernelInstallProgress) => void
 
@@ -164,6 +171,109 @@ async function installItbrowser(token: CancellationToken, listener: ProgressList
   emit(listener, { kernel: 'itbrowser', phase: 'done', message: 'itbrowser installed' })
 }
 
+function cloakAssetName(host: string, arch: string): string {
+  if (host === 'linux' && arch === 'arm64') return 'cloakbrowser-linux-arm64.tar.gz'
+  if (host === 'linux') return 'cloakbrowser-linux-x64.tar.gz'
+  if (host === 'win32') return 'cloakbrowser-windows-x64.zip'
+  throw new Error(`CloakBrowser does not provide a binary for ${host}-${arch}`)
+}
+
+async function extract7z(archivePath: string, destDir: string, kernel: KernelType, token: CancellationToken, listener: ProgressListener) {
+  await new Promise<void>((resolve, reject) => {
+    const stream = extractFull(archivePath, destDir, {
+      $bin: sevenBin.path7za,
+      $progress: true
+    })
+    stream.on('progress', (progress: { percent?: number; file?: string }) => {
+      if (token.isCanceled) {
+        try { stream.destroy() } catch {}
+        return reject(new Error('Installation canceled'))
+      }
+      emit(listener, {
+        kernel,
+        phase: 'extract',
+        bytesDone: progress.percent,
+        bytesTotal: 100,
+        message: progress.file
+      })
+    })
+    stream.on('end', () => resolve())
+    stream.on('error', (error: Error) => reject(error))
+  })
+}
+
+async function installCloak(token: CancellationToken, listener: ProgressListener) {
+  const host = hostOs()
+  if (host === 'darwin') {
+    throw new Error('CloakBrowser does not provide a macOS binary; falling back to extension mode is required.')
+  }
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+  const root = cloakRoot()
+  fs.mkdirSync(root, { recursive: true })
+
+  const assetName = cloakAssetName(host, arch)
+  const url = `https://github.com/CloakHQ/CloakBrowser/releases/download/${CLOAK_RELEASE_TAG}/${assetName}`
+  const archivePath = path.join(root, assetName)
+
+  emit(listener, { kernel: 'cloak', phase: 'pending', message: `Preparing CloakBrowser ${arch} download` })
+
+  if (!fs.existsSync(archivePath) || fs.statSync(archivePath).size < 50 * 1024 * 1024) {
+    rmrf(archivePath)
+    await downloadFile(url, archivePath, token, listener, 'cloak')
+  } else {
+    emit(listener, { kernel: 'cloak', phase: 'download', bytesDone: fs.statSync(archivePath).size, bytesTotal: fs.statSync(archivePath).size, message: 'Reusing cached archive' })
+  }
+
+  token.throwIfCanceled()
+  emit(listener, { kernel: 'cloak', phase: 'extract', message: 'Extracting CloakBrowser archive' })
+
+  // clean previous install dir but keep archive cache
+  for (const entry of fs.readdirSync(root)) {
+    if (entry === assetName) continue
+    rmrf(path.join(root, entry))
+  }
+
+  if (assetName.endsWith('.zip')) {
+    await extract7z(archivePath, root, 'cloak', token, listener)
+  } else if (assetName.endsWith('.tar.gz')) {
+    if (host === 'linux') {
+      // Linux: system tar reliably handles tar.gz one-shot
+      await execFileAsync('tar', ['-xzf', archivePath, '-C', root])
+    } else {
+      // 7za two-pass: tar.gz -> tar -> dir
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloak-'))
+      try {
+        await extract7z(archivePath, tmpDir, 'cloak', token, listener)
+        const tarFile = fs.readdirSync(tmpDir).find((name) => name.endsWith('.tar'))
+        if (!tarFile) throw new Error('Inner .tar not found after first extract pass')
+        await extract7z(path.join(tmpDir, tarFile), root, 'cloak', token, listener)
+      } finally {
+        rmrf(tmpDir)
+      }
+    }
+  }
+
+  token.throwIfCanceled()
+  emit(listener, { kernel: 'cloak', phase: 'verify', message: 'Verifying CloakBrowser layout' })
+
+  const exeName = host === 'win32' ? 'chrome.exe' : 'chrome'
+  const candidates = [
+    path.join(root, 'cloakbrowser', exeName),
+    path.join(root, 'cloakbrowser', 'chrome'),
+    path.join(root, exeName)
+  ]
+  const exe = candidates.find((candidate) => fs.existsSync(candidate))
+  if (!exe) {
+    throw new Error(`CloakBrowser executable not found after extraction. Looked in: ${candidates.join(', ')}`)
+  }
+  if (host !== 'win32') {
+    try { fs.chmodSync(exe, 0o755) } catch {}
+  }
+  fs.writeFileSync(path.join(root, 'VERSION'), CLOAK_RELEASE_TAG.replace(/^chromium-/, ''))
+
+  emit(listener, { kernel: 'cloak', phase: 'done', message: 'CloakBrowser installed' })
+}
+
 export function installKernel(kernel: KernelType, listener: ProgressListener) {
   const existing = installations.get(kernel)
   if (existing) return existing.promise
@@ -172,6 +282,7 @@ export function installKernel(kernel: KernelType, listener: ProgressListener) {
   const promise = (async () => {
     try {
       if (kernel === 'chromium') await installChromium(token, listener)
+      else if (kernel === 'cloak') await installCloak(token, listener)
       else await installItbrowser(token, listener)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

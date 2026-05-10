@@ -85,6 +85,15 @@ export function hostOs(): HostOs {
   return 'linux'
 }
 
+export function fingerprintSeed(profileId: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < profileId.length; i++) {
+    hash ^= profileId.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return Math.abs(hash >>> 0)
+}
+
 export function defaultTargetOs(): TargetOs {
   const host = hostOs()
   if (host === 'win32') return 'windows'

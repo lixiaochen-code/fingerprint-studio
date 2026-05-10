@@ -8,8 +8,10 @@ type Locale = 'en' | 'zh'
 const labels = {
   en: {
     titleChromium: 'Install Chromium kernel',
+    titleCloak: 'Install CloakBrowser kernel',
     titleItbrowser: 'Install itbrowser kernel',
-    descChromium: 'Used by every profile that does not run on the Windows itbrowser fork. Roughly 150 MB.',
+    descChromium: 'Used as the JS-injection fallback when no source-level kernel is installed. Roughly 150 MB.',
+    descCloak: 'Source-level patched Chromium with 49+ C++ fingerprint patches (canvas, WebGL, audio, fonts, WebRTC, …). Linux/Windows binary, ~200–540 MB. macOS not supported by upstream.',
     descItbrowser: 'Optional Windows-only fingerprint browser. About 250 MB compressed, ~600 MB after extraction.',
     install: 'Install',
     cancel: 'Cancel',
@@ -26,14 +28,17 @@ const labels = {
     phaseError: 'Error',
     phasePending: 'Preparing',
     phaseCanceled: 'Canceled',
-    skipUnsupported: 'itbrowser is only available on Windows hosts.',
+    skipUnsupportedItbrowser: 'itbrowser is only available on Windows hosts.',
+    skipUnsupportedCloak: 'CloakBrowser does not publish a macOS binary.',
     statusInstalled: 'Installed',
     statusMissing: 'Missing'
   },
   zh: {
     titleChromium: '安装 Chromium 内核',
+    titleCloak: '安装 CloakBrowser 内核',
     titleItbrowser: '安装 itbrowser 内核',
-    descChromium: '所有非 Windows itbrowser 模式都会使用它，约 150 MB。',
+    descChromium: '作为 JS 注入兜底方案。所有内核级方案不可用时使用，约 150 MB。',
+    descCloak: '源码级打补丁的 Chromium，包含 49+ 项 C++ 指纹补丁（canvas、WebGL、audio、字体、WebRTC 等）。Linux/Windows 二进制，约 200–540 MB。macOS 上游未发布。',
     descItbrowser: '仅 Windows 可用的指纹浏览器，压缩约 250 MB，解压后约 600 MB。',
     install: '安装',
     cancel: '取消',
@@ -50,7 +55,8 @@ const labels = {
     phaseError: '错误',
     phasePending: '准备中',
     phaseCanceled: '已取消',
-    skipUnsupported: 'itbrowser 仅支持 Windows 宿主机。',
+    skipUnsupportedItbrowser: 'itbrowser 仅支持 Windows 宿主机。',
+    skipUnsupportedCloak: 'CloakBrowser 暂未发布 macOS 二进制。',
     statusInstalled: '已安装',
     statusMissing: '未安装'
   }
@@ -67,11 +73,12 @@ export type KernelSetupProps = {
   status?: KernelStatus
   locale: Locale
   hostSupportsItbrowser: boolean
+  hostSupportsCloak: boolean
   onClose: () => void
   onInstalled?: () => void
 }
 
-export function KernelSetup({ open, kernel, status, locale, hostSupportsItbrowser, onClose, onInstalled }: KernelSetupProps) {
+export function KernelSetup({ open, kernel, status, locale, hostSupportsItbrowser, hostSupportsCloak, onClose, onInstalled }: KernelSetupProps) {
   const t = labels[locale]
   const [progress, setProgress] = useState<KernelInstallProgress | undefined>()
   const [installing, setInstalling] = useState(false)
@@ -110,9 +117,10 @@ export function KernelSetup({ open, kernel, status, locale, hostSupportsItbrowse
     return () => off()
   }, [open, kernel, onInstalled])
 
-  const title = kernel === 'itbrowser' ? t.titleItbrowser : t.titleChromium
-  const description = kernel === 'itbrowser' ? t.descItbrowser : t.descChromium
-  const unsupported = kernel === 'itbrowser' && !hostSupportsItbrowser
+  const title = kernel === 'itbrowser' ? t.titleItbrowser : kernel === 'cloak' ? t.titleCloak : t.titleChromium
+  const description = kernel === 'itbrowser' ? t.descItbrowser : kernel === 'cloak' ? t.descCloak : t.descChromium
+  const unsupported = (kernel === 'itbrowser' && !hostSupportsItbrowser) || (kernel === 'cloak' && !hostSupportsCloak)
+  const unsupportedMessage = kernel === 'itbrowser' ? t.skipUnsupportedItbrowser : t.skipUnsupportedCloak
 
   const phaseLabel = useMemo(() => {
     switch (progress?.phase) {
@@ -172,7 +180,7 @@ export function KernelSetup({ open, kernel, status, locale, hostSupportsItbrowse
         </div>
 
         {unsupported && (
-          <p className="mb-4 text-xs text-amber-500">{t.skipUnsupported}</p>
+          <p className="mb-4 text-xs text-amber-500">{unsupportedMessage}</p>
         )}
 
         {(installing || progress) && (

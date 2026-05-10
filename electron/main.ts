@@ -12,6 +12,7 @@ import {
   assertLaunchableBrowser,
   browserCacheDirForRuntimeInfo,
   buildLaunchArgs,
+  cloakSupported,
   itbrowserSupported,
   kernelStatusMap,
   selectKernel
@@ -35,10 +36,11 @@ function message(en: string, zh: string) {
 
 function fingerprintMode(): FingerprintMode {
   const mode = (process.env.AUTO_REGISTRY_FINGERPRINT_MODE || '').toLowerCase()
-  if (mode === 'off' || mode === 'extension' || mode === 'itbrowser') return mode as FingerprintMode
+  if (mode === 'off' || mode === 'extension' || mode === 'cloak' || mode === 'itbrowser') return mode as FingerprintMode
   if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '0') return 'off'
   if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '1') return 'itbrowser'
-  return 'extension'
+  // auto: prefer cloak on supported hosts, fall back to extension
+  return cloakSupported() ? 'cloak' : 'extension'
 }
 
 function fingerprintSpoofingEnabled() {
@@ -59,10 +61,12 @@ function proxyUrl(profile: BrowserProfile) {
 async function runtimeInfo(): Promise<RuntimeInfo> {
   return {
     hostOs: hostOs(),
+    hostArch: process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : 'unknown',
     fingerprintMode: fingerprintMode(),
     fingerprintSpoofingEnabled: fingerprintSpoofingEnabled(),
     kernels: await kernelStatusMap(),
     itbrowserSupported: itbrowserSupported(),
+    cloakSupported: cloakSupported(),
     managedBrowserCacheDir: browserCacheDirForRuntimeInfo()
   }
 }
@@ -254,7 +258,34 @@ app.whenReady().then(async () => {
   ipcMain.handle('profiles:list', () => store.list())
   ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => store.upsert(draft))
   ipcMain.handle('profiles:remove', (_event, id: string) => store.remove(id))
-  ipcMain.handle('profiles:duplicate', (_event, id: string) => store.duplicate(id))
+  ipcMain.handle('profiles:duplicate', (_event, id: string) => {
+    const source = store.get(id)
+    if (!source) throw new Error(message('Profile not found', '环境不存在'))
+    const running = profileProcesses.get(id)
+    if (running && !running.killed) {
+      throw new Error(message(
+        'Stop the source environment before duplicating it.',
+        '请先停止源环境再复制，避免拷贝运行中被锁的文件。'
+      ))
+    }
+    const next = store.duplicate(id)
+    if (fs.existsSync(source.profilePath)) {
+      fs.cpSync(source.profilePath, next.profilePath, {
+        recursive: true,
+        force: true,
+        errorOnExist: false,
+        dereference: false,
+        filter: (src) => {
+          const base = path.basename(src)
+          // Skip Chromium runtime lock and singleton files; they are recreated on launch.
+          if (base === 'SingletonLock' || base === 'SingletonCookie' || base === 'SingletonSocket') return false
+          if (base === 'lockfile') return false
+          return true
+        }
+      })
+    }
+    return next
+  })
   ipcMain.handle('profiles:randomFingerprint', (_event, targetOs?: string) => makeFingerprint(undefined, targetOs as never))
   ipcMain.handle('profiles:status', () => runtimeStatus())
   ipcMain.handle('profiles:launch', async (_event, id: string) => {

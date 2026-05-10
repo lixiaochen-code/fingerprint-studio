@@ -58,9 +58,9 @@ export type BrowserRuntimeStatus = {
   running: boolean
 }
 
-export type FingerprintMode = 'off' | 'extension' | 'itbrowser'
+export type FingerprintMode = 'off' | 'extension' | 'cloak' | 'itbrowser'
 
-export type KernelType = 'chromium' | 'itbrowser'
+export type KernelType = 'chromium' | 'cloak' | 'itbrowser'
 
 export type KernelStatus = {
   type: KernelType
@@ -72,6 +72,7 @@ export type KernelStatus = {
 
 export type KernelStatusMap = {
   chromium: KernelStatus
+  cloak: KernelStatus
   itbrowser: KernelStatus
 }
 
@@ -93,10 +94,12 @@ export type KernelMissingError = {
 
 export type RuntimeInfo = {
   hostOs: HostOs
+  hostArch: 'x64' | 'arm64' | 'unknown'
   fingerprintMode: FingerprintMode
   fingerprintSpoofingEnabled: boolean
   kernels: KernelStatusMap
   itbrowserSupported: boolean
+  cloakSupported: boolean
   managedBrowserCacheDir: string
 }
 
