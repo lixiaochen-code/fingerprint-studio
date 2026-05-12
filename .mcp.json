@@ -6,6 +6,43 @@
         "shadcn@latest",
         "mcp"
       ]
+    },
+     "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-fetch"
+      ]
+    },
+    "Git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git"
+      ],
+      "env": {}
+    },
+    "pencil": {
+      "command": "/Users/lichen/.pencil/mcp/kiro/out/mcp-server-darwin-arm64",
+      "args": [
+        "--app",
+        "kiro"
+      ],
+      "env": {},
+      "type": "stdio"
     }
   }
 }
