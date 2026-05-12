@@ -58,6 +58,13 @@ export type BrowserRuntimeStatus = {
   running: boolean
 }
 
+export type BrowserCrashEvent = {
+  profileId: string
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  stderrTail?: string
+}
+
 export type FingerprintMode = 'off' | 'extension' | 'cloak' | 'itbrowser'
 
 export type KernelType = 'chromium' | 'cloak' | 'itbrowser'

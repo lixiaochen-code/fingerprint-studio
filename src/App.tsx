@@ -92,6 +92,8 @@ type Translations = {
   themeDark: string
   themeSystem: string
   fingerprintModeHint: string
+  browserCrashedTitle: string
+  browserCrashedDetails: string
   fingerprintModes: {
     extension: { title: string; description: string }
     cloak: { title: string; description: string }
@@ -151,6 +153,8 @@ const translations: Record<Locale, Translations> = {
     themeDark: 'Dark',
     themeSystem: 'System',
     fingerprintModeHint: 'How browser fingerprint is being spoofed for every profile.',
+    browserCrashedTitle: 'Browser exited unexpectedly: {{name}}',
+    browserCrashedDetails: 'Exit code {{code}}{{signal}}. Check the log for details.',
     fingerprintModes: {
       extension: {
         title: 'Extension mode',
@@ -227,6 +231,8 @@ const translations: Record<Locale, Translations> = {
     themeDark: '深色',
     themeSystem: '跟随系统',
     fingerprintModeHint: '当前为每个环境改写浏览器指纹的方式。',
+    browserCrashedTitle: '浏览器异常退出：{{name}}',
+    browserCrashedDetails: '退出码 {{code}}{{signal}}。可在日志中查看详情。',
     fingerprintModes: {
       extension: {
         title: '扩展模式',
@@ -380,6 +386,31 @@ export function App() {
     const timer = window.setInterval(() => void load(), 3000)
     return () => window.clearInterval(timer)
   }, [])
+
+  // Subscribe once: main process emits profiles:crashed when a spawned browser dies
+  // outside of a user-initiated stop. We surface it so users stop staring at a silent UI.
+  useEffect(() => {
+    const unsubscribe = window.registry.profiles.onCrashed((event) => {
+      const profile = profiles.find((item) => item.id === event.profileId)
+      const name = profile?.name || event.profileId
+      const code = event.exitCode ?? 'n/a'
+      const signal = event.signal ? ` · ${event.signal}` : ''
+      toast.error(interpolate(t.browserCrashedTitle, { name }), {
+        description: (
+          <div className="space-y-1">
+            <p className="text-[11px]">{interpolate(t.browserCrashedDetails, { code: String(code), signal })}</p>
+            {event.stderrTail && (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 text-[10px] font-mono text-muted-foreground">
+                {event.stderrTail.slice(-2000)}
+              </pre>
+            )}
+          </div>
+        )
+      })
+      void load()
+    })
+    return () => unsubscribe()
+  }, [profiles, t])
 
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
@@ -765,6 +796,7 @@ export function App() {
         initial={formDialog.open && formDialog.mode === 'edit' ? formDialog.profile : undefined}
         plugins={plugins}
         locale={locale}
+        hostOs={runtimeInfo?.hostOs}
         onCancel={() => setFormDialog({ open: false })}
         onSubmit={submitProfile}
         onImportPlugin={importPluginFromForm}

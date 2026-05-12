@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, TargetOsChoice } from '../electron/types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, TargetOsChoice } from '../electron/types'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
 
@@ -16,6 +16,7 @@ declare global {
         stop: (id: string) => Promise<void>
         status: () => Promise<Array<{ profileId: string; running: boolean }>>
         randomFingerprint: (targetOs?: TargetOsChoice) => Promise<FingerprintConfig>
+        onCrashed: (listener: (event: BrowserCrashEvent) => void) => () => void
       }
       plugins: {
         list: () => Promise<BrowserPlugin[]>
@@ -32,13 +33,6 @@ declare global {
         cancel: (kernel: KernelType) => Promise<{ ok: boolean }>
         onProgress: (listener: (progress: KernelInstallProgress) => void) => () => void
       }
-    }
-    envBrowser?: {
-      goBack: () => void
-      goForward: () => void
-      reload: () => void
-      navigate: (url: string) => void
-      openPluginPage: (url: string) => void
     }
   }
 }

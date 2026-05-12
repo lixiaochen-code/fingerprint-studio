@@ -4,12 +4,20 @@ import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import type { BrowserPlugin, BrowserProfile, ProfileDraft, TargetOsChoice } from '../../electron/types'
+import type { BrowserPlugin, BrowserProfile, HostOs, ProfileDraft, TargetOs, TargetOsChoice } from '../../electron/types'
 
 type Locale = 'en' | 'zh'
 
 const targetOsOptions: TargetOsChoice[] = ['random', 'windows', 'mac', 'linux']
 const platformOptions = ['amazon', 'shopify', 'ebay', 'tiktok', 'walmart', 'other']
+
+// Map Electron's hostOs enum to the TargetOs the user can pick. We use this so "Add new"
+// defaults the fingerprint OS to the user's machine — requested product behavior.
+function hostToTargetOs(host: HostOs | undefined): TargetOs {
+  if (host === 'win32') return 'windows'
+  if (host === 'darwin') return 'mac'
+  return 'linux'
+}
 
 const labels = {
   en: {
@@ -23,6 +31,9 @@ const labels = {
     startUrlPlaceholder: 'https://www.amazon.com',
     proxyHost: 'Proxy Host',
     proxyPort: 'Proxy Port',
+    proxyUsername: 'Proxy Username',
+    proxyPassword: 'Proxy Password',
+    proxyAuthHint: 'Optional. Leave blank for anonymous proxies. Credentials are saved locally and injected at launch via a helper extension.',
     notes: 'Notes',
     notesPlaceholder: 'Optional operating notes',
     plugins: 'Plugins',
@@ -50,6 +61,9 @@ const labels = {
     startUrlPlaceholder: 'https://www.amazon.com',
     proxyHost: '代理主机',
     proxyPort: '代理端口',
+    proxyUsername: '代理账号',
+    proxyPassword: '代理密码',
+    proxyAuthHint: '可选。匿名代理请留空。账号密码仅保存在本地，启动时通过辅助扩展自动注入。',
     notes: '备注',
     notesPlaceholder: '可选运营备注',
     plugins: '插件',
@@ -74,6 +88,7 @@ export type ProfileFormDialogProps = {
   initial?: BrowserProfile
   plugins: BrowserPlugin[]
   locale: Locale
+  hostOs: HostOs | undefined
   onCancel: () => void
   onSubmit: (draft: ProfileDraft) => Promise<void>
   onImportPlugin: () => Promise<BrowserPlugin | undefined>
@@ -85,20 +100,24 @@ type FormState = {
   startUrl: string
   proxyHost: string
   proxyPort: string
+  proxyUsername: string
+  proxyPassword: string
   notes: string
   targetOs: TargetOsChoice
   enabledPluginIds: string[]
 }
 
-function blankForm(): FormState {
+function blankForm(hostOs: TargetOsChoice): FormState {
   return {
     name: '',
     platform: 'other',
     startUrl: 'https://www.google.com',
     proxyHost: '127.0.0.1',
     proxyPort: '7890',
+    proxyUsername: '',
+    proxyPassword: '',
     notes: '',
-    targetOs: 'random',
+    targetOs: hostOs,
     enabledPluginIds: []
   }
 }
@@ -110,25 +129,28 @@ function formFromProfile(profile: BrowserProfile): FormState {
     startUrl: profile.startUrl,
     proxyHost: profile.proxy.host,
     proxyPort: String(profile.proxy.port),
+    proxyUsername: profile.proxy.username ?? '',
+    proxyPassword: profile.proxy.password ?? '',
     notes: profile.notes,
     targetOs: profile.fingerprint.targetOs,
     enabledPluginIds: [...profile.enabledPluginIds]
   }
 }
 
-export function ProfileFormDialog({ open, mode, initial, plugins, locale, onCancel, onSubmit, onImportPlugin }: ProfileFormDialogProps) {
+export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs, onCancel, onSubmit, onImportPlugin }: ProfileFormDialogProps) {
   const t = labels[locale]
-  const [form, setForm] = useState<FormState>(blankForm)
+  const defaultTarget = hostToTargetOs(hostOs)
+  const [form, setForm] = useState<FormState>(() => blankForm(defaultTarget))
   const [submitting, setSubmitting] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | undefined>()
 
   useEffect(() => {
     if (!open) return
-    setForm(initial ? formFromProfile(initial) : blankForm())
+    setForm(initial ? formFromProfile(initial) : blankForm(defaultTarget))
     setError(undefined)
     setSubmitting(false)
-  }, [open, initial])
+  }, [open, initial, defaultTarget])
 
   const targetLabel = useMemo(() => ({
     random: t.osRandom,
@@ -153,7 +175,10 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, onCanc
         enabledPluginIds: form.enabledPluginIds,
         proxy: {
           host: form.proxyHost,
-          port: Number(form.proxyPort) || 7890
+          port: Number(form.proxyPort) || 7890,
+          username: form.proxyUsername.trim() || undefined,
+          // Passwords stay exactly as typed — trimming would silently break credentials with a leading/trailing space.
+          password: form.proxyPassword ? form.proxyPassword : undefined
         }
       }
       await onSubmit(draft)
@@ -223,6 +248,24 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, onCanc
         <Field label={t.proxyPort}>
           <Input value={form.proxyPort} inputMode="numeric" onChange={(e) => setForm((prev) => ({ ...prev, proxyPort: e.target.value }))} placeholder="7890" />
         </Field>
+        <Field label={t.proxyUsername}>
+          <Input
+            value={form.proxyUsername}
+            autoComplete="off"
+            onChange={(e) => setForm((prev) => ({ ...prev, proxyUsername: e.target.value }))}
+            placeholder="(optional)"
+          />
+        </Field>
+        <Field label={t.proxyPassword}>
+          <Input
+            value={form.proxyPassword}
+            type="password"
+            autoComplete="new-password"
+            onChange={(e) => setForm((prev) => ({ ...prev, proxyPassword: e.target.value }))}
+            placeholder="(optional)"
+          />
+        </Field>
+        <div className="md:col-span-2 -mt-2 text-[11px] text-muted-foreground">{t.proxyAuthHint}</div>
         <Field label={t.notes} className="md:col-span-2">
           <Input value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t.notesPlaceholder} />
         </Field>

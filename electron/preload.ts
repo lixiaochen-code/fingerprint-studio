@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, TargetOsChoice } from './types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, TargetOsChoice } from './types'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
 
@@ -12,7 +12,12 @@ const api = {
     launch: (id: string) => ipcRenderer.invoke('profiles:launch', id) as Promise<LaunchResult>,
     stop: (id: string) => ipcRenderer.invoke('profiles:stop', id) as Promise<void>,
     status: () => ipcRenderer.invoke('profiles:status'),
-    randomFingerprint: (targetOs?: TargetOsChoice) => ipcRenderer.invoke('profiles:randomFingerprint', targetOs)
+    randomFingerprint: (targetOs?: TargetOsChoice) => ipcRenderer.invoke('profiles:randomFingerprint', targetOs),
+    onCrashed: (listener: (event: BrowserCrashEvent) => void) => {
+      const handler = (_event: unknown, payload: BrowserCrashEvent) => listener(payload)
+      ipcRenderer.on('profiles:crashed', handler)
+      return () => ipcRenderer.removeListener('profiles:crashed', handler)
+    }
   },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list') as Promise<BrowserPlugin[]>,

@@ -1,11 +1,12 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
-import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
+import { extractFull } from 'node-7z'
+import sevenBin from '7zip-bin'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, RuntimeInfo, KernelInstallProgress } from './types'
+import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, RuntimeInfo, KernelInstallProgress } from './types'
 import { hostOs } from './fingerprint'
 import {
   KernelMissingError,
@@ -21,10 +22,10 @@ import { cancelInstall, installKernel, isInstalling } from './downloader'
 import { ensureDirs, pluginsRoot } from './paths'
 
 const isDev = !app.isPackaged
-const execFileAsync = promisify(execFile)
 let mainWindow: BrowserWindow | undefined
 let store: ProfileStore
 const profileProcesses = new Map<string, ChildProcess>()
+const STDERR_TAIL_LIMIT = 8 * 1024 // 8KB of recent stderr per profile, cheap and enough for stack traces
 
 function appLocale() {
   return app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en'
@@ -147,10 +148,22 @@ async function importPluginZip() {
   const tempDir = path.join(os.tmpdir(), `auto-registry-plugin-${Date.now()}`)
   fs.mkdirSync(tempDir, { recursive: true })
   fs.mkdirSync(pluginRoot, { recursive: true })
-  await execFileAsync('unzip', ['-q', '-o', zipPath, '-d', tempDir])
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const stream = extractFull(zipPath, tempDir, { $bin: sevenBin.path7za })
+      stream.on('end', () => resolve())
+      stream.on('error', (error: Error) => reject(error))
+    })
+  } catch (error) {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }) } catch {}
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(message(`Failed to extract ZIP: ${reason}`, `解压 ZIP 失败：${reason}`))
+  }
 
   const manifestDir = findManifestDir(tempDir)
   if (!manifestDir) {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }) } catch {}
     throw new Error(message(
       'manifest.json was not found in the ZIP. Please confirm this is a Chrome extension package.',
       'ZIP 中没有找到 manifest.json，请确认这是 Chrome 扩展插件包'
@@ -167,6 +180,7 @@ async function importPluginZip() {
   const version = manifest.version?.trim() || '0.0.0'
   const targetDir = path.join(pluginRoot, `${name.replace(/[^a-z0-9._-]+/gi, '_')}-${version}-${Date.now().toString(36)}`)
   fs.cpSync(manifestDir, targetDir, { recursive: true })
+  try { fs.rmSync(tempDir, { recursive: true, force: true }) } catch {}
 
   return store.addPluginVersion({
     name,
@@ -192,7 +206,7 @@ async function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      devTools: true
+      devTools: isDev
     }
   })
 
@@ -202,6 +216,20 @@ async function createMainWindow() {
   } else {
     await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+}
+
+function rememberStderr(buffers: string[], chunk: Buffer) {
+  buffers.push(chunk.toString('utf8'))
+  let total = buffers.reduce((acc, piece) => acc + piece.length, 0)
+  while (total > STDERR_TAIL_LIMIT && buffers.length > 1) {
+    const removed = buffers.shift()!
+    total -= removed.length
+  }
+}
+
+function emitCrash(event: BrowserCrashEvent) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('profiles:crashed', event)
 }
 
 async function launchProfile(profile: BrowserProfile) {
@@ -219,13 +247,44 @@ async function launchProfile(profile: BrowserProfile) {
 
   enableExtensionDeveloperMode(profile.profilePath)
 
+  // detached keeps the browser alive if the app is killed, but we still want to read stderr while we're around.
   const child = spawn(selection.executable, args, {
     detached: true,
-    stdio: 'ignore'
+    stdio: ['ignore', 'ignore', 'pipe']
   })
+  const stderrBuffers: string[] = []
+  child.stderr?.on('data', (chunk: Buffer) => rememberStderr(stderrBuffers, chunk))
+  child.stderr?.on('error', () => { /* ignore; process dying can surface EPIPE here */ })
+
+  // prevent the pipe from keeping the event loop alive; still allowed to buffer data
   child.unref()
+
   profileProcesses.set(profile.id, child)
-  child.on('exit', () => profileProcesses.delete(profile.id))
+  const startedAt = Date.now()
+  child.on('exit', (code, signal) => {
+    profileProcesses.delete(profile.id)
+    const uptimeMs = Date.now() - startedAt
+    // SIGTERM from our own stopProfile or normal close — no need to shout
+    const userStopped = signal === 'SIGTERM' || signal === 'SIGKILL'
+    const crashed = !userStopped && (code !== 0 || uptimeMs < 3000)
+    if (crashed) {
+      emitCrash({
+        profileId: profile.id,
+        exitCode: code,
+        signal,
+        stderrTail: stderrBuffers.join('').slice(-STDERR_TAIL_LIMIT) || undefined
+      })
+    }
+  })
+  child.on('error', (error) => {
+    profileProcesses.delete(profile.id)
+    emitCrash({
+      profileId: profile.id,
+      exitCode: null,
+      signal: null,
+      stderrTail: error.message
+    })
+  })
   store.markOpened(profile.id)
 }
 
@@ -257,7 +316,24 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('profiles:list', () => store.list())
   ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => store.upsert(draft))
-  ipcMain.handle('profiles:remove', (_event, id: string) => store.remove(id))
+  ipcMain.handle('profiles:remove', async (_event, id: string) => {
+    const profile = store.get(id)
+    const running = profileProcesses.get(id)
+    if (running && !running.killed) {
+      running.kill()
+      profileProcesses.delete(id)
+      // give Chromium a moment to release its file locks so the rm won't fight SingletonLock
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    store.remove(id)
+    if (profile?.profilePath) {
+      try {
+        fs.rmSync(profile.profilePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+      } catch (error) {
+        console.error('[profiles:remove] failed to delete profile dir', profile.profilePath, error)
+      }
+    }
+  })
   ipcMain.handle('profiles:duplicate', (_event, id: string) => {
     const source = store.get(id)
     if (!source) throw new Error(message('Profile not found', '环境不存在'))
@@ -302,7 +378,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('plugins:list', () => store.listPlugins())
   ipcMain.handle('plugins:importZip', () => importPluginZip())
   ipcMain.handle('plugins:setActiveVersion', (_event, pluginId: string, versionId: string) => store.setActivePluginVersion(pluginId, versionId))
-  ipcMain.handle('plugins:remove', (_event, pluginId: string) => store.removePlugin(pluginId))
+  ipcMain.handle('plugins:remove', (_event, pluginId: string) => {
+    const plugin = store.listPlugins().find((item) => item.id === pluginId)
+    store.removePlugin(pluginId)
+    if (!plugin) return
+    for (const version of plugin.versions) {
+      if (!version.path) continue
+      try {
+        fs.rmSync(version.path, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+      } catch (error) {
+        console.error('[plugins:remove] failed to delete plugin dir', version.path, error)
+      }
+    }
+  })
   ipcMain.handle('runtime:info', () => runtimeInfo())
 
   ipcMain.handle('kernel:status', () => kernelStatusMap())

@@ -39,7 +39,7 @@ pnpm run dev
 
 ```bash
 AUTO_REGISTRY_BROWSER_PATH="/path/to/chrome"  pnpm run dev
-AUTO_REGISTRY_FINGERPRINT_MODE=off            pnpm run dev   # off | extension | itbrowser
+AUTO_REGISTRY_FINGERPRINT_MODE=off            pnpm run dev   # off | extension | cloak | itbrowser
 ```
 
 ## 打包

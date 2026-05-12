@@ -3,6 +3,7 @@ import path from 'node:path'
 import { Browser, getInstalledBrowsers, getVersionComparator } from '@puppeteer/browsers'
 import type { BrowserProfile, HostOs, KernelStatus, KernelStatusMap, KernelType, TargetOs } from './types'
 import { ensureFingerprintExtension, fingerprintSeed, hostOs, writeFingerprintPayload } from './fingerprint'
+import { ensureProxyAuthExtension } from './proxyAuth'
 import { browsersRoot, chromiumCacheDir, cloakRoot, configuredBrowserPath, itbrowserRoot, legacyBrowsersDir } from './paths'
 
 export class KernelMissingError extends Error {
@@ -51,11 +52,32 @@ async function chromiumStatus(): Promise<KernelStatus> {
     if (!fs.existsSync(cacheDir)) continue
     try {
       const installed = await getInstalledBrowsers({ cacheDir })
-      const browsers = installed
-        .filter((browser) => browser.browser === Browser.CHROMIUM || browser.browser === Browser.CHROME)
-        .filter((browser) => fs.existsSync(browser.executablePath))
-        .sort((a, b) => getVersionComparator(b.browser)(b.buildId, a.buildId))
-      const found = browsers[0]
+      const usable = installed.filter((browser) =>
+        (browser.browser === Browser.CHROMIUM || browser.browser === Browser.CHROME)
+        && fs.existsSync(browser.executablePath)
+      )
+      if (!usable.length) continue
+
+      // Each browser family has its own version comparator; mixing them in one sort is unsafe.
+      const byFamily = new Map<Browser, typeof usable>()
+      for (const browser of usable) {
+        const list = byFamily.get(browser.browser) ?? []
+        list.push(browser)
+        byFamily.set(browser.browser, list)
+      }
+
+      // Prefer Chromium (that's what we install); fall back to Chrome if only Chrome is around.
+      const preferenceOrder: Browser[] = [Browser.CHROMIUM, Browser.CHROME]
+      let found: typeof usable[number] | undefined
+      for (const family of preferenceOrder) {
+        const list = byFamily.get(family)
+        if (!list?.length) continue
+        const comparator = getVersionComparator(family)
+        list.sort((a, b) => comparator(b.buildId, a.buildId))
+        found = list[0]
+        break
+      }
+
       if (found) {
         return {
           type: 'chromium',
@@ -65,7 +87,9 @@ async function chromiumStatus(): Promise<KernelStatus> {
           sizeMB: dirSizeMB(path.dirname(found.executablePath))
         }
       }
-    } catch {}
+    } catch (error) {
+      console.error('[kernel] chromiumStatus scan failed for', cacheDir, error)
+    }
   }
   return { type: 'chromium', installed: false }
 }
@@ -205,6 +229,11 @@ export function buildLaunchArgs(profile: BrowserProfile, selection: KernelSelect
   if (selection.mode === 'extension') {
     allExtensions.push(ensureFingerprintExtension(profile))
   }
+  // Proxy auth extension is independent of fingerprint mode — even itbrowser/cloak need
+  // credentials delivered this way because Chromium strips them from --proxy-server.
+  const proxyAuthExt = ensureProxyAuthExtension(profile)
+  if (proxyAuthExt) allExtensions.push(proxyAuthExt)
+
   allExtensions.push(...extensionPaths)
   if (allExtensions.length) {
     const joined = allExtensions.join(',')

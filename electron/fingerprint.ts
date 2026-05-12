@@ -197,7 +197,6 @@ export function writeFingerprintPayload(profile: BrowserProfile) {
 export function ensureFingerprintExtension(profile: BrowserProfile) {
   const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')
   fs.mkdirSync(extensionPath, { recursive: true })
-
   const manifest = {
     manifest_version: 3,
     name: 'Auto Registry Fingerprint',

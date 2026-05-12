@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app } from 'electron'
 import type { BrowserPlugin, BrowserProfile, PluginVersion, ProfileDraft, ProxyConfig } from './types'
 import { makeFingerprint } from './fingerprint'
 import { dataRoot, profilesRoot } from './paths'
@@ -67,11 +66,24 @@ export class ProfileStore {
     const now = new Date().toISOString()
     const existing = draft.id ? this.profiles.find((profile) => profile.id === draft.id) : undefined
     const profileId = existing?.id ?? id()
+
+    // If the draft provides a proxy object at all, treat its auth fields as authoritative
+    // (including emptying them); only fall back to existing when the draft omits proxy
+    // entirely. This lets users remove previously saved credentials.
+    const draftProxy = draft.proxy
+    const existingProxy = existing?.proxy
+    const normalizedUsername = draftProxy
+      ? (draftProxy.username?.trim() || undefined)
+      : existingProxy?.username
+    const normalizedPassword = draftProxy
+      ? (draftProxy.password || undefined) // do NOT trim — passwords may have leading/trailing spaces
+      : existingProxy?.password
+
     const proxy: ProxyConfig = {
-      host: draft.proxy?.host?.trim() || existing?.proxy.host || DEFAULT_PROXY.host,
-      port: Number(draft.proxy?.port || existing?.proxy.port || DEFAULT_PROXY.port),
-      username: draft.proxy?.username?.trim() || existing?.proxy.username,
-      password: draft.proxy?.password?.trim() || existing?.proxy.password
+      host: draftProxy?.host?.trim() || existingProxy?.host || DEFAULT_PROXY.host,
+      port: Number(draftProxy?.port || existingProxy?.port || DEFAULT_PROXY.port),
+      username: normalizedUsername,
+      password: normalizedPassword
     }
 
     const profile: BrowserProfile = {
@@ -220,22 +232,50 @@ export class ProfileStore {
         }))
       this.profiles = normalizedProfiles
       if (JSON.stringify(rawProfiles) !== JSON.stringify(normalizedProfiles)) {
-        fs.writeFileSync(this.profilesFile, JSON.stringify(normalizedProfiles, null, 2))
+        writeJsonAtomic(this.profilesFile, normalizedProfiles)
       }
-    } catch {
+    } catch (error) {
+      console.error('[ProfileStore] failed to load profiles.json', error)
+      quarantineCorruptFile(this.profilesFile)
       this.profiles = []
     }
     try {
       this.plugins = fs.existsSync(this.pluginsFile)
         ? JSON.parse(fs.readFileSync(this.pluginsFile, 'utf8')) as BrowserPlugin[]
         : []
-    } catch {
+    } catch (error) {
+      console.error('[ProfileStore] failed to load plugins.json', error)
+      quarantineCorruptFile(this.pluginsFile)
       this.plugins = []
     }
   }
 
   private save() {
-    fs.writeFileSync(this.profilesFile, JSON.stringify(this.profiles, null, 2))
-    fs.writeFileSync(this.pluginsFile, JSON.stringify(this.plugins, null, 2))
+    writeJsonAtomic(this.profilesFile, this.profiles)
+    writeJsonAtomic(this.pluginsFile, this.plugins)
+  }
+}
+
+function writeJsonAtomic(filePath: string, payload: unknown) {
+  const dir = path.dirname(filePath)
+  fs.mkdirSync(dir, { recursive: true })
+  const tmpPath = `${filePath}.${process.pid}.${Date.now().toString(36)}.tmp`
+  const contents = JSON.stringify(payload, null, 2)
+  fs.writeFileSync(tmpPath, contents)
+  try {
+    fs.renameSync(tmpPath, filePath)
+  } catch (error) {
+    try { fs.rmSync(tmpPath, { force: true }) } catch {}
+    throw error
+  }
+}
+
+function quarantineCorruptFile(filePath: string) {
+  if (!fs.existsSync(filePath)) return
+  const target = `${filePath}.corrupt-${Date.now().toString(36)}`
+  try {
+    fs.renameSync(filePath, target)
+  } catch (error) {
+    console.error('[ProfileStore] failed to quarantine corrupt file', filePath, error)
   }
 }
