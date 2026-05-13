@@ -6,23 +6,17 @@
 ## 0. 当前快照
 
 - **分支**：`main`
-- **最后一次已推送提交**：`7413193`（xxxxx）
-- **未推送的本地提交**：`58dcdad feat(scripts): phase 1+2 — scripting subsystem foundation`
-- **工作区状态（提交后）**：Phase 3 Step 1 已编写并通过 `pnpm run build`，**尚未提交**。下一台机器 pull 之后，需要手动 commit Step 1 的改动，再往下推进。
-- **Phase 3 Step 1 涉及文件**（未 commit）：
-  - `electron/main.ts` · `electron/preload.ts` · `src/App.tsx` · `src/vite-env.d.ts` · `src/components/ScriptsView.tsx`（新文件）
+- **远端最新提交**：`1f2f100 feat(scripts/ui): phase 3 step 1 — scripts tab, list, CRUD, handoff doc`
+- **Phase 3 Step 1 状态**：✅ 已实现、✅ `pnpm run build` 绿、✅ 已 commit & push。**尚未做手工 UI 走查**（§10 那份清单），由新机器上的你负责跑完。
 
 换机操作：
 
 ```bash
-git pull                    # 把 58dcdad 拉下来
-# 修改应该会以 unstaged 形式出现（因为只在原机提交过 Phase 2）
-# 新机器重新安装依赖
+git clone / git pull
 pnpm install
-pnpm run build              # 确认 build 绿
+pnpm run build              # sanity check — 必绿
+pnpm run dev                # 启动应用，按 §10 走一遍 UI
 ```
-
-如果 git 状态干净且 HEAD 已是 Phase 3 Step 1 的提交，跳过。否则按"Phase 3 Step 1 继续事项"完成提交。
 
 ---
 
@@ -187,57 +181,31 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
 ---
 
-## 10. Phase 3 Step 1 继续事项（到新机器做这步）
+## 10. Phase 3 Step 1 UI 手工验证清单
+
+代码已提交；到新机器上只剩走一遍实际交互确认没有回归。
 
 ```bash
-# 换机后：
 cd /path/to/auto--registry
-git pull
-pnpm install
-
-# 工作区里 App.tsx / preload.ts / main.ts / vite-env.d.ts 会有未 staged 改动
-# 外加一个新文件 src/components/ScriptsView.tsx
-# 确认文件齐全：
-git status
-
-pnpm run build   # 应该绿
+git pull                     # 确保最新
+pnpm install                 # 新机首次
+pnpm run build               # sanity check
+pnpm run dev
 ```
 
-如果 build 绿，**立刻提交**：
+按顺序走：
 
-```bash
-git add electron/main.ts electron/preload.ts src/App.tsx src/vite-env.d.ts src/components/ScriptsView.tsx
-git commit -m "feat(scripts/ui): phase 3 step 1 — scripts tab list + CRUD
+1. 右上角应该有新的 `<>` 按钮（FileCode2），点进去是 Scripts 视图
+2. 侧栏顶部两个 `+` 按钮：一个加 FileCode 图标（新建本地），一个加 FolderOpen 图标（注册外部）
+3. 试"新建本地"：名字 `ui-smoke`，创建后侧栏应立刻出现并自动选中
+4. 试"注册外部"：Browse 应该弹系统 Open 对话框（过滤 .ts/.tsx/.js/...），选一个文件
+5. 右侧详情显示脚本名 + 徽章 + entryPath + Reveal in Finder / Delete
+6. 点 Reveal → 访达/资源管理器跳到对应位置（local 在 userData 下，external 在你的项目里）
+7. 点 Delete → 弹确认。local 文案提到"脚本目录会被删除"；external 文案提到"只取消登记"
+8. 切换 tab 回 Environments 再切回 Scripts，列表还在
+9. 切换 EN/中文，文案切换正常
 
-- New 'Scripts' tab in the header (FileCode2 icon), toggles with home
-- ScriptsView: 280px sidebar with LOCAL/EXTERNAL badges, create-local
-  and register-external buttons, empty state, delete with source-aware
-  confirm copy
-- Detail pane shows name, badge, description, entryPath, Reveal in
-  Finder + Delete buttons; editor/run panel land in the next step
-- main.ts: scripts:pickExternalFile + scripts:revealInFinder IPC using
-  Electron dialog and shell.showItemInFolder
-- preload + vite-env.d.ts: typed surface for the two new IPC methods
-- App.tsx: View enum now includes 'scripts'; load() also fetches
-  scripts; Header uses currentView instead of isSettings
-
-Verified by build; manual UI walkthrough is the next task."
-```
-
-手工 UI 验证步骤（按顺序）：
-
-1. `pnpm run dev` 启动
-2. 右上角应该有新的 `<>` 按钮（FileCode2），点进去是 Scripts 视图
-3. 侧栏顶部两个 `+` 按钮：一个加 FileCode 图标（新建本地），一个加 FolderOpen 图标（注册外部）
-4. 试"新建本地"：名字 `ui-smoke`，创建后侧栏应立刻出现并自动选中
-5. 试"注册外部"：Browse 应该弹系统 Open 对话框（过滤 .ts/.tsx/.js/...），选一个文件
-6. 右侧详情显示脚本名 + 徽章 + entryPath + Reveal in Finder / Delete
-7. 点 Reveal → 访达/资源管理器跳到对应位置（local 在 userData 下，external 在你的项目里）
-8. 点 Delete → 弹确认。local 文案提到"脚本目录会被删除"；external 文案提到"只取消登记"
-9. 切换 tab 回 Environments 再切回 Scripts，列表还在
-10. 切换 EN/中文，文案切换正常
-
-如果某步不对，贴给 agent，先修再进 Step 2。
+如果某步不对，贴给 agent，**先修再进 Step 2**。全部通过就直接进 §11 Step 2。
 
 ---
 
