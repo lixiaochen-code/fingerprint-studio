@@ -143,3 +143,57 @@ export type BrowserPlugin = {
   createdAt: string
   updatedAt: string
 }
+
+// —— Scripting system ————————————————————————————————————————
+
+/**
+ * 脚本来源：
+ * - local：源码保存在 <userData>/registry-data/scripts/<id>/index.ts，由应用内编辑器管理
+ * - external：源码在用户自己的目录里（Dev 模式），仅保存绝对路径引用
+ *
+ * 两种来源共享 Script 的其它字段，只在运行时根据 source 选择加载路径。
+ */
+export type ScriptSource = 'local' | 'external'
+
+export type Script = {
+  id: string
+  name: string
+  description?: string
+  source: ScriptSource
+  /** 绝对路径；local 脚本指向应用数据目录内，external 脚本指向外部任意目录 */
+  entryPath: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ScriptRunStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'stopped'
+
+export type ScriptRun = {
+  id: string
+  scriptId: string
+  profileId: string
+  status: ScriptRunStatus
+  startedAt: string
+  endedAt?: string
+  exitCode?: number | null
+  /** 最终错误信息；仅 failed / stopped 状态有值 */
+  error?: string
+  /** 绝对路径，runtime 会把 stdout/stderr 追加到这里 */
+  logPath: string
+}
+
+export type ScriptDraft = {
+  id?: string
+  name: string
+  description?: string
+  source: ScriptSource
+  /** 仅 external 必填；local 会由 store 自动生成 */
+  entryPath?: string
+  /** 仅 local 新建时有意义：初始源码，会写入 index.ts */
+  initialSource?: string
+}

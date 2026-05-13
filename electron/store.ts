@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { BrowserPlugin, BrowserProfile, PluginVersion, ProfileDraft, ProxyConfig } from './types'
 import { makeFingerprint } from './fingerprint'
 import { dataRoot, profilesRoot } from './paths'
+import { quarantineCorruptFile, writeJsonAtomic } from './persistence'
 
 const DEFAULT_PROXY: ProxyConfig = {
   host: '127.0.0.1',
@@ -253,29 +254,5 @@ export class ProfileStore {
   private save() {
     writeJsonAtomic(this.profilesFile, this.profiles)
     writeJsonAtomic(this.pluginsFile, this.plugins)
-  }
-}
-
-function writeJsonAtomic(filePath: string, payload: unknown) {
-  const dir = path.dirname(filePath)
-  fs.mkdirSync(dir, { recursive: true })
-  const tmpPath = `${filePath}.${process.pid}.${Date.now().toString(36)}.tmp`
-  const contents = JSON.stringify(payload, null, 2)
-  fs.writeFileSync(tmpPath, contents)
-  try {
-    fs.renameSync(tmpPath, filePath)
-  } catch (error) {
-    try { fs.rmSync(tmpPath, { force: true }) } catch {}
-    throw error
-  }
-}
-
-function quarantineCorruptFile(filePath: string) {
-  if (!fs.existsSync(filePath)) return
-  const target = `${filePath}.corrupt-${Date.now().toString(36)}`
-  try {
-    fs.renameSync(filePath, target)
-  } catch (error) {
-    console.error('[ProfileStore] failed to quarantine corrupt file', filePath, error)
   }
 }

@@ -30,8 +30,30 @@ export function itbrowserRoot() {
   return path.join(browsersRoot(), 'itbrowser')
 }
 
+export function scriptsRoot() {
+  return path.join(dataRoot(), 'scripts')
+}
+
+export function scriptRunLogsRoot() {
+  return path.join(dataRoot(), 'script-runs')
+}
+
+export function scriptsTypingsDir() {
+  return path.join(scriptsRoot(), '.typings')
+}
+
 export function ensureDirs() {
-  for (const dir of [dataRoot(), profilesRoot(), pluginsRoot(), browsersRoot(), chromiumCacheDir(), cloakRoot(), itbrowserRoot()]) {
+  for (const dir of [
+    dataRoot(),
+    profilesRoot(),
+    pluginsRoot(),
+    browsersRoot(),
+    chromiumCacheDir(),
+    cloakRoot(),
+    itbrowserRoot(),
+    scriptsRoot(),
+    scriptRunLogsRoot()
+  ]) {
     fs.mkdirSync(dir, { recursive: true })
   }
 }

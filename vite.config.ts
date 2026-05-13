@@ -12,10 +12,16 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    watch: {
+      ignored: ['**/test-script/**']
+    }
   },
   build: {
     outDir: 'dist',
     emptyOutDir: true
+  },
+  optimizeDeps: {
+    exclude: ['test-script']
   }
 })

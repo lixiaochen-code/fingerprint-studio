@@ -1,8 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, TargetOsChoice } from '../electron/types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from '../electron/types'
+import type { ScriptRuntimeEvent } from '../electron/scripts/runtime'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
+type ScriptRunResult = { ok: true; run: ScriptRun } | { ok: false; error: { message: string } }
 
 declare global {
   interface Window {
@@ -32,6 +34,19 @@ declare global {
         install: (kernel: KernelType) => Promise<{ ok: boolean; error?: { message: string }; alreadyRunning?: boolean }>
         cancel: (kernel: KernelType) => Promise<{ ok: boolean }>
         onProgress: (listener: (progress: KernelInstallProgress) => void) => () => void
+      }
+      scripts: {
+        list: () => Promise<Script[]>
+        listRuns: () => Promise<ScriptRun[]>
+        activeRuns: () => Promise<ScriptRun[]>
+        save: (draft: ScriptDraft) => Promise<Script>
+        remove: (id: string) => Promise<void>
+        readSource: (id: string) => Promise<string>
+        writeSource: (id: string, source: string) => Promise<void>
+        run: (scriptId: string, profileId: string) => Promise<ScriptRunResult>
+        stop: (runId: string) => Promise<void>
+        stopAll: () => Promise<void>
+        onEvent: (listener: (event: ScriptRuntimeEvent) => void) => () => void
       }
     }
   }

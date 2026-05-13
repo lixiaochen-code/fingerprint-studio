@@ -6,7 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } fr
 import { extractFull } from 'node-7z'
 import sevenBin from '7zip-bin'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, RuntimeInfo, KernelInstallProgress } from './types'
+import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
 import { hostOs } from './fingerprint'
 import {
   KernelMissingError,
@@ -20,10 +20,15 @@ import {
 } from './kernel'
 import { cancelInstall, installKernel, isInstalling } from './downloader'
 import { ensureDirs, pluginsRoot } from './paths'
+import { ScriptStore } from './scripts/store'
+import { ScriptRuntimeManager, type ScriptRuntimeEvent } from './scripts/runtime'
+import { waitForDevToolsEndpoint } from './scripts/cdp'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | undefined
 let store: ProfileStore
+let scriptStore: ScriptStore
+let scriptRuntime: ScriptRuntimeManager
 const profileProcesses = new Map<string, ChildProcess>()
 const STDERR_TAIL_LIMIT = 8 * 1024 // 8KB of recent stderr per profile, cheap and enough for stack traces
 
@@ -247,6 +252,11 @@ async function launchProfile(profile: BrowserProfile) {
 
   enableExtensionDeveloperMode(profile.profilePath)
 
+  // 清掉上一次浏览器残留的 DevToolsActivePort：Chromium 被 SIGKILL 或应用异常退出时
+  // 不会清它，而脚本子系统依赖这个文件找 CDP 端口——留着旧值会让 puppeteer 连到已死的端口。
+  const stalePortFile = path.join(profile.profilePath, 'DevToolsActivePort')
+  try { fs.rmSync(stalePortFile, { force: true }) } catch {}
+
   // detached keeps the browser alive if the app is killed, but we still want to read stderr while we're around.
   const child = spawn(selection.executable, args, {
     detached: true,
@@ -295,6 +305,26 @@ function stopProfile(profileId: string) {
   profileProcesses.delete(profileId)
 }
 
+/**
+ * 给脚本子系统用：确保 profile 浏览器已运行，并返回一个可被 puppeteer.connect 的 endpoint。
+ * 如果 profile 已在跑就直接复用；否则 launchProfile 之后再等 CDP 就绪。
+ *
+ * 故意不合并进 launchProfile：GUI 的启动动作不应等 CDP（否则"点启动"到弹窗之间会有额外停顿），
+ * 而脚本子系统本来就需要串行等待。
+ *
+ * 健壮性：Chromium 异常退出时 DevToolsActivePort 不会被清，下次 run 可能读到旧端口。
+ * launchProfile 会在 spawn 前删这个文件，此外若我们已知 profile 正在跑但依然要脚本启动，
+ * 也会做一次校验式握手（这里通过"再 launch 一次"覆盖所有 stale 场景）。
+ */
+async function ensureProfileRunningForScript(profile: BrowserProfile): Promise<string> {
+  const existing = profileProcesses.get(profile.id)
+  if (!existing || existing.killed) {
+    await launchProfile(profile)
+  }
+  const endpoint = await waitForDevToolsEndpoint(profile.profilePath, { timeoutMs: 20_000 })
+  return endpoint.webSocketDebuggerUrl
+}
+
 function emitKernelProgress(progress: KernelInstallProgress) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.webContents.send('kernel:progress', progress)
@@ -313,6 +343,12 @@ function serializeError(error: unknown) {
 app.whenReady().then(async () => {
   ensureDirs()
   store = new ProfileStore()
+  scriptStore = new ScriptStore()
+  scriptRuntime = new ScriptRuntimeManager(scriptStore)
+  scriptRuntime.on('event', (event: ScriptRuntimeEvent) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('scripts:event', event)
+  })
 
   ipcMain.handle('profiles:list', () => store.list())
   ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => store.upsert(draft))
@@ -393,6 +429,41 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('runtime:info', () => runtimeInfo())
 
+  // —— scripts subsystem ————————————————————————————————————————
+  ipcMain.handle('scripts:list', () => scriptStore.list())
+  ipcMain.handle('scripts:listRuns', () => scriptStore.listRuns())
+  ipcMain.handle('scripts:activeRuns', () => scriptRuntime.listActive())
+  ipcMain.handle('scripts:save', (_event, draft: ScriptDraft): Script => scriptStore.upsert(draft))
+  ipcMain.handle('scripts:remove', (_event, id: string) => {
+    // 杀掉该脚本所有活跃 run，再删
+    for (const run of scriptRuntime.listActive()) {
+      if (run.scriptId === id) void scriptRuntime.stop(run.id)
+    }
+    scriptStore.remove(id)
+  })
+  ipcMain.handle('scripts:readSource', (_event, id: string) => scriptStore.readSource(id))
+  ipcMain.handle('scripts:writeSource', (_event, id: string, source: string) => scriptStore.writeSource(id, source))
+  ipcMain.handle('scripts:run', async (_event, scriptId: string, profileId: string) => {
+    const script = scriptStore.get(scriptId)
+    if (!script) throw new Error(`Script not found: ${scriptId}`)
+    const profile = store.get(profileId)
+    if (!profile) throw new Error(`Profile not found: ${profileId}`)
+
+    try {
+      const webSocketDebuggerUrl = await ensureProfileRunningForScript(profile)
+      const run = await scriptRuntime.start({ script, profile, webSocketDebuggerUrl })
+      return { ok: true as const, run }
+    } catch (error) {
+      return { ok: false as const, error: serializeError(error) }
+    }
+  })
+  ipcMain.handle('scripts:stop', async (_event, runId: string) => {
+    await scriptRuntime.stop(runId)
+  })
+  ipcMain.handle('scripts:stopAll', async () => {
+    await scriptRuntime.stopAll()
+  })
+
   ipcMain.handle('kernel:status', () => kernelStatusMap())
   ipcMain.handle('kernel:install', async (_event, kernel: KernelType) => {
     if (isInstalling(kernel)) return { ok: true, alreadyRunning: true }
@@ -413,6 +484,11 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// 应用准备退出时杀掉所有脚本子进程，避免孤儿；浏览器因为 detached:true 保持不变
+app.on('before-quit', () => {
+  void scriptRuntime?.shutdown()
 })
 
 app.on('activate', () => {

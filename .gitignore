@@ -6,3 +6,5 @@ dist-electron/
 .browsers/
 .env
 *.local
+test-script/
+release/

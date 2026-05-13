@@ -206,7 +206,12 @@ export function buildLaunchArgs(profile: BrowserProfile, selection: KernelSelect
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
-    '--enable-extensions'
+    '--enable-extensions',
+    // CDP 开关：端口 0 = 让 Chromium 挑一个空闲端口，真正的端口号会被写入
+    // <user-data-dir>/DevToolsActivePort。绑定 127.0.0.1 保证仅本机可连，
+    // 避免同网段用户接管已登录账号。脚本系统通过这个端口附着到浏览器。
+    '--remote-debugging-port=0',
+    '--remote-debugging-address=127.0.0.1'
   ]
 
   if (selection.mode === 'native' && selection.type === 'itbrowser') {

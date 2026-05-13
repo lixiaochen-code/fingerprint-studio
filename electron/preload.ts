@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, TargetOsChoice } from './types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
+import type { ScriptRuntimeEvent } from './scripts/runtime'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
+type ScriptRunResult = { ok: true; run: ScriptRun } | { ok: false; error: { message: string } }
 
 const api = {
   profiles: {
@@ -36,6 +38,24 @@ const api = {
       const handler = (_event: unknown, progress: KernelInstallProgress) => listener(progress)
       ipcRenderer.on('kernel:progress', handler)
       return () => ipcRenderer.removeListener('kernel:progress', handler)
+    }
+  },
+  scripts: {
+    list: () => ipcRenderer.invoke('scripts:list') as Promise<Script[]>,
+    listRuns: () => ipcRenderer.invoke('scripts:listRuns') as Promise<ScriptRun[]>,
+    activeRuns: () => ipcRenderer.invoke('scripts:activeRuns') as Promise<ScriptRun[]>,
+    save: (draft: ScriptDraft) => ipcRenderer.invoke('scripts:save', draft) as Promise<Script>,
+    remove: (id: string) => ipcRenderer.invoke('scripts:remove', id) as Promise<void>,
+    readSource: (id: string) => ipcRenderer.invoke('scripts:readSource', id) as Promise<string>,
+    writeSource: (id: string, source: string) => ipcRenderer.invoke('scripts:writeSource', id, source) as Promise<void>,
+    run: (scriptId: string, profileId: string) =>
+      ipcRenderer.invoke('scripts:run', scriptId, profileId) as Promise<ScriptRunResult>,
+    stop: (runId: string) => ipcRenderer.invoke('scripts:stop', runId) as Promise<void>,
+    stopAll: () => ipcRenderer.invoke('scripts:stopAll') as Promise<void>,
+    onEvent: (listener: (event: ScriptRuntimeEvent) => void) => {
+      const handler = (_event: unknown, payload: ScriptRuntimeEvent) => listener(payload)
+      ipcRenderer.on('scripts:event', handler)
+      return () => ipcRenderer.removeListener('scripts:event', handler)
     }
   }
 }
