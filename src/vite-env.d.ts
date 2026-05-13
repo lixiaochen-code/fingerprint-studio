@@ -46,6 +46,8 @@ declare global {
         run: (scriptId: string, profileId: string) => Promise<ScriptRunResult>
         stop: (runId: string) => Promise<void>
         stopAll: () => Promise<void>
+        pickExternalFile: () => Promise<string | undefined>
+        revealInFinder: (filePath: string) => Promise<void>
         onEvent: (listener: (event: ScriptRuntimeEvent) => void) => () => void
       }
     }

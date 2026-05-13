@@ -463,6 +463,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('scripts:stopAll', async () => {
     await scriptRuntime.stopAll()
   })
+  ipcMain.handle('scripts:pickExternalFile', async () => {
+    const dialogOptions: OpenDialogOptions = {
+      title: message('Select script file', '选择脚本文件'),
+      properties: ['openFile'],
+      filters: [{ name: 'Script', extensions: ['ts', 'tsx', 'js', 'jsx', 'mts', 'cts'] }]
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions)
+    if (result.canceled || !result.filePaths[0]) return undefined
+    return result.filePaths[0]
+  })
+  ipcMain.handle('scripts:revealInFinder', (_event, filePath: string) => {
+    shell.showItemInFolder(filePath)
+  })
 
   ipcMain.handle('kernel:status', () => kernelStatusMap())
   ipcMain.handle('kernel:install', async (_event, kernel: KernelType) => {

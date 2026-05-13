@@ -52,6 +52,8 @@ const api = {
       ipcRenderer.invoke('scripts:run', scriptId, profileId) as Promise<ScriptRunResult>,
     stop: (runId: string) => ipcRenderer.invoke('scripts:stop', runId) as Promise<void>,
     stopAll: () => ipcRenderer.invoke('scripts:stopAll') as Promise<void>,
+    pickExternalFile: () => ipcRenderer.invoke('scripts:pickExternalFile') as Promise<string | undefined>,
+    revealInFinder: (filePath: string) => ipcRenderer.invoke('scripts:revealInFinder', filePath) as Promise<void>,
     onEvent: (listener: (event: ScriptRuntimeEvent) => void) => {
       const handler = (_event: unknown, payload: ScriptRuntimeEvent) => listener(payload)
       ipcRenderer.on('scripts:event', handler)

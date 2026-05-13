@@ -29,14 +29,16 @@ import {
   Info,
   Sun,
   Moon,
-  Monitor
+  Monitor,
+  FileCode2
 } from 'lucide-react'
-import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, TargetOs } from '../electron/types'
+import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, TargetOs } from '../electron/types'
 import { KernelSetup } from './components/KernelSetup'
 import { ProfileFormDialog } from './components/ProfileFormDialog'
 import { ProfileDetailsDialog } from './components/ProfileDetailsDialog'
 import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog'
 import { SettingsView } from './components/SettingsView'
+import { ScriptsView } from './components/ScriptsView'
 import { interpolate } from './lib/i18n'
 import './styles.css'
 
@@ -321,7 +323,7 @@ function formatDate(value?: string) {
   }
 }
 
-type View = 'profiles' | 'settings'
+type View = 'profiles' | 'settings' | 'scripts'
 
 type FormDialogState =
   | { open: false }
@@ -344,6 +346,8 @@ export function App() {
   const [setupKernel, setSetupKernel] = useState<KernelType>()
   const [themePref, setThemePref] = useState<ThemePref>(initialTheme)
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => resolveTheme(initialTheme()))
+  const [scripts, setScripts] = useState<Script[]>([])
+  const [selectedScriptId, setSelectedScriptId] = useState<string>()
   const t = translations[locale]
 
   useEffect(() => {
@@ -362,16 +366,18 @@ export function App() {
   }, [resolvedTheme])
 
   async function load() {
-    const [nextProfiles, nextPlugins, statuses, nextRuntimeInfo] = await Promise.all([
+    const [nextProfiles, nextPlugins, statuses, nextRuntimeInfo, nextScripts] = await Promise.all([
       window.registry.profiles.list(),
       window.registry.plugins.list(),
       window.registry.profiles.status(),
-      window.registry.runtime.info()
+      window.registry.runtime.info(),
+      window.registry.scripts.list()
     ])
     setProfiles(nextProfiles)
     setPlugins(nextPlugins)
     setRunningIds(new Set(statuses.filter((status: any) => status.running).map((status: any) => status.profileId)))
     setRuntimeInfo(nextRuntimeInfo)
+    setScripts(nextScripts)
     setSelectedIds((prev) => {
       const next = new Set<string>()
       for (const id of prev) {
@@ -547,6 +553,64 @@ export function App() {
     await load()
   }
 
+  async function createScript(draft: ScriptDraft) {
+    try {
+      const created = await window.registry.scripts.save(draft)
+      toast.success(interpolate(locale === 'zh' ? '脚本已保存：{{name}}' : 'Script saved: {{name}}', { name: created.name }))
+      await load()
+      return created
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(interpolate(t.actionFailed, { action: 'SCRIPT', message }))
+      throw error
+    }
+  }
+
+  async function removeScript(scriptId: string) {
+    try {
+      await window.registry.scripts.remove(scriptId)
+      toast.success(locale === 'zh' ? '脚本已删除' : 'Script removed')
+      await load()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(interpolate(t.actionFailed, { action: 'SCRIPT', message }))
+    }
+  }
+
+  if (view === 'scripts') {
+    return (
+      <div className="flex h-screen flex-col bg-background text-foreground font-sans">
+        <Header
+          t={t}
+          locale={locale}
+          profilesCount={profiles.length}
+          pluginsCount={plugins.length}
+          runningCount={runningIds.size}
+          runtime={runtimeInfo}
+          themePref={themePref}
+          onThemeChange={setThemePref}
+          onAdd={() => setFormDialog({ open: true, mode: 'create' })}
+          onSettings={() => setView('settings')}
+          onScripts={() => setView('scripts')}
+          onHome={() => setView('profiles')}
+          onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
+          currentView="scripts"
+        />
+        <div className="flex-1 overflow-hidden">
+          <ScriptsView
+            locale={locale}
+            scripts={scripts}
+            selectedScriptId={selectedScriptId}
+            onSelect={setSelectedScriptId}
+            onCreate={createScript}
+            onRemove={removeScript}
+          />
+        </div>
+        <Toaster theme={resolvedTheme} position="top-right" richColors closeButton />
+      </div>
+    )
+  }
+
   if (view === 'settings') {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground font-sans">
@@ -561,8 +625,10 @@ export function App() {
           onThemeChange={setThemePref}
           onAdd={() => setFormDialog({ open: true, mode: 'create' })}
           onSettings={() => setView('settings')}
+          onScripts={() => setView('scripts')}
+          onHome={() => setView('profiles')}
           onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
-          isSettings
+          currentView="settings"
         />
         <div className="flex-1 overflow-auto">
           <SettingsView
@@ -604,7 +670,10 @@ export function App() {
         onThemeChange={setThemePref}
         onAdd={() => setFormDialog({ open: true, mode: 'create' })}
         onSettings={() => setView('settings')}
+        onScripts={() => setView('scripts')}
+        onHome={() => setView('profiles')}
         onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
+        currentView="profiles"
       />
 
       <main className="flex flex-1 flex-col overflow-hidden">
@@ -873,6 +942,7 @@ function FingerprintBadge({ runtime, t }: { runtime?: RuntimeInfo; t: Translatio
 
 function Header({
   t,
+  locale,
   profilesCount,
   pluginsCount,
   runningCount,
@@ -881,8 +951,10 @@ function Header({
   onThemeChange,
   onAdd,
   onSettings,
+  onScripts,
+  onHome,
   onLocaleToggle,
-  isSettings
+  currentView
 }: {
   t: Translations
   locale: Locale
@@ -894,10 +966,14 @@ function Header({
   onThemeChange: (pref: ThemePref) => void
   onAdd: () => void
   onSettings: () => void
+  onScripts: () => void
+  onHome: () => void
   onLocaleToggle: () => void
-  isSettings?: boolean
+  currentView: View
 }) {
   const ThemeIcon = themePref === 'light' ? Sun : themePref === 'dark' ? Moon : Monitor
+  const isSettings = currentView === 'settings'
+  const isScripts = currentView === 'scripts'
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between px-6">
@@ -962,13 +1038,26 @@ function Header({
               { label: t.themeSystem, icon: <Monitor className="h-3 w-3" />, onClick: () => onThemeChange('system') }
             ]}
           />
-          {!isSettings && (
+          {!isSettings && !isScripts && (
             <Button size="sm" className="gap-2" onClick={onAdd}>
               <Plus className="h-4 w-4" />
               {t.addNew}
             </Button>
           )}
-          <Button variant={isSettings ? 'default' : 'secondary'} size="sm" onClick={onSettings} title={t.settings}>
+          <Button
+            variant={isScripts ? 'default' : 'secondary'}
+            size="sm"
+            onClick={isScripts ? onHome : onScripts}
+            title={locale === 'zh' ? '脚本' : 'Scripts'}
+          >
+            <FileCode2 className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={isSettings ? 'default' : 'secondary'}
+            size="sm"
+            onClick={isSettings ? onHome : onSettings}
+            title={t.settings}
+          >
             <Settings2 className="h-4 w-4" />
           </Button>
         </div>
