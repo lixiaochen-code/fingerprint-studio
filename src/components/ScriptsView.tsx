@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FileCode2, FolderOpen, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react'
+import { FileCode2, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -7,7 +7,12 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { interpolate } from '@/lib/i18n'
 import type { Script, ScriptDraft, ScriptSource } from '../../electron/types'
 
+// 懒加载：Monaco 是 4MB 级 bundle，只有进入 Scripts 视图后才需要。
+// 配合 vite.config.ts 里的 manualChunks 把它拆成独立 'monaco' chunk。
+const ScriptEditor = lazy(() => import('./ScriptEditor').then((m) => ({ default: m.ScriptEditor })))
+
 type Locale = 'en' | 'zh'
+type Theme = 'light' | 'dark'
 
 type Translations = {
   title: string
@@ -111,6 +116,7 @@ const labels: Record<Locale, Translations> = {
 
 export type ScriptsViewProps = {
   locale: Locale
+  theme: Theme
   scripts: Script[]
   selectedScriptId?: string
   onSelect: (scriptId: string | undefined) => void
@@ -119,7 +125,7 @@ export type ScriptsViewProps = {
 }
 
 export function ScriptsView(props: ScriptsViewProps) {
-  const { locale, scripts, selectedScriptId, onSelect, onCreate, onRemove } = props
+  const { locale, theme, scripts, selectedScriptId, onSelect, onCreate, onRemove } = props
   const t = labels[locale]
 
   const [createOpen, setCreateOpen] = useState<ScriptSource | undefined>()
@@ -192,7 +198,7 @@ export function ScriptsView(props: ScriptsViewProps) {
 
       <section className="flex-1 overflow-hidden">
         {selected ? (
-          <DetailPane script={selected} t={t} onDelete={() => setPendingDelete(selected)} />
+          <DetailPane script={selected} t={t} locale={locale} theme={theme} onDelete={() => setPendingDelete(selected)} />
         ) : (
           <EmptyState message={t.emptyDetail} />
         )}
@@ -246,10 +252,22 @@ function EmptyState({ message }: { message: string }) {
 }
 
 /**
- * 详情面板目前只有脚本元信息 + 删除按钮。
- * Phase 3 Step 2 会把 Monaco Editor 挂在这里；Step 3 会在下方嵌入运行面板。
+ * 详情面板：顶部元信息条 + Monaco 编辑器（local 可写，external 只读）。
+ * Step 3 会在编辑器下方挂运行面板（profile 选择 + 实时日志）。
  */
-function DetailPane({ script, t, onDelete }: { script: Script; t: Translations; onDelete: () => void }) {
+function DetailPane({
+  script,
+  t,
+  locale,
+  theme,
+  onDelete
+}: {
+  script: Script
+  t: Translations
+  locale: Locale
+  theme: Theme
+  onDelete: () => void
+}) {
   const revealInFinder = useCallback(() => {
     void window.registry.scripts.revealInFinder(script.entryPath)
   }, [script.entryPath])
@@ -276,8 +294,15 @@ function DetailPane({ script, t, onDelete }: { script: Script; t: Translations; 
           </Button>
         </div>
       </header>
-      <div className="flex-1 overflow-auto p-6 text-xs text-muted-foreground">
-        <p className="font-mono">Editor & run panel land in the next step.</p>
+      <div className="flex-1 overflow-hidden">
+        <Suspense fallback={
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+            <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+            Loading editor...
+          </div>
+        }>
+          <ScriptEditor script={script} locale={locale} theme={theme} />
+        </Suspense>
       </div>
     </div>
   )

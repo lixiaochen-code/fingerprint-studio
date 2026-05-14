@@ -599,6 +599,7 @@ export function App() {
         <div className="flex-1 overflow-hidden">
           <ScriptsView
             locale={locale}
+            theme={resolvedTheme}
             scripts={scripts}
             selectedScriptId={selectedScriptId}
             onSelect={setSelectedScriptId}
