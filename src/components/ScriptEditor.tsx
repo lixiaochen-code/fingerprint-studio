@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Editor, { type OnMount } from '@monaco-editor/react'
+import Editor, { loader, type OnMount } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,106 @@ import { SCRIPT_EDITOR_TYPINGS } from '@/lib/scriptTypings'
 // 这样懒加载 ScriptEditor 时一并把 worker 注册好，不会被首屏 bundle 拖累。
 import '@/lib/monacoSetup'
 import type { Script } from '../../electron/types'
+
+/**
+ * 关键：`@monaco-editor/react` 默认通过 CDN（jsdelivr）加载它自己的 monaco 实例，
+ * 与我们 `import * as monaco from 'monaco-editor'` 是两套，setCompilerOptions
+ * 配在本地这套上对 <Editor> 内部那套无效——这就是为什么之前一直报
+ * "Cannot find module 'auto-registry'"：本地 monaco 配过 Classic + extraLib，但
+ * <Editor> 用的是默认配置的 CDN 实例。
+ *
+ * `loader.config({ monaco })` 让 react wrapper 跳过 CDN，直接用我们打进 bundle 的
+ * 本地 monaco —— 配置才能真正生效。这步必须在任何 <Editor> mount 之前完成。
+ */
+loader.config({ monaco })
+
+/**
+ * Monaco TS 服务的全局配置必须在任何 model 创建前完成。
+ * 写在模块顶层 = 懒加载 ScriptEditor 时**先**配置、**再**让 <Editor> mount。
+ * Monaco 是单例：这段无论 ScriptEditor mount 几次都只跑一次（模块缓存）。
+ */
+monaco.typescript.typescriptDefaults.setCompilerOptions({
+  target: monaco.typescript.ScriptTarget.ES2020,
+  module: monaco.typescript.ModuleKind.ESNext,
+  // Classic 跳过 node_modules 探测，只看 ambient `declare module`。我们的
+  // `auto-registry` 是 SCRIPT_EDITOR_TYPINGS 里的虚拟模块，不存在 node_modules 实体。
+  moduleResolution: monaco.typescript.ModuleResolutionKind.Classic,
+  allowNonTsExtensions: true,
+  esModuleInterop: true,
+  strict: false,
+  noEmit: true,
+  skipLibCheck: true
+})
+monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
+  noSemanticValidation: false,
+  noSyntaxValidation: false
+})
+for (const lib of SCRIPT_EDITOR_TYPINGS) {
+  monaco.typescript.typescriptDefaults.addExtraLib(lib.contents, lib.path)
+}
+
+/**
+ * Monaco 的 TS 服务**不会**从 ambient `declare module` 自动推断"可 import 的包名候选"
+ * （Classic moduleResolution 下尤其如此），用户敲 `from '` 不会弹列表。
+ *
+ * 自定义一个 completion provider，专门覆盖光标位于 import 字符串字面量内的场景，
+ * 把内置包名 + 简短描述喂给补全菜单。
+ *
+ * 范围：触发字符是 ' 和 "；我们只在以下 pattern 命中时返回候选：
+ *   - `from '`        （ES module import）
+ *   - `from "`
+ *   - `import('`      （动态 import）
+ *   - `import("`
+ *   - `require('`     （兼容用户写 CJS 风格）
+ *   - `require("`
+ */
+type BuiltinPackage = { name: string; description: string }
+
+const BUILTIN_PACKAGES: BuiltinPackage[] = [
+  { name: 'auto-registry', description: 'SDK：profile / browser / page / log / sleep / kv / stopSignal' },
+  { name: 'puppeteer-core', description: 'Chromium 自动化（DevTools 协议客户端）' },
+  { name: 'axios', description: 'HTTP 客户端' },
+  { name: 'cheerio', description: 'HTML/XML 解析与查询（jQuery 风格）' },
+  { name: 'dayjs', description: '轻量日期时间库' },
+  { name: 'zod', description: 'TypeScript-first 模式校验' }
+]
+
+const IMPORT_SPECIFIER_REGEX = /(?:from|import|require)\s*\(?\s*['"][^'"]*$/
+
+monaco.languages.registerCompletionItemProvider(['typescript', 'javascript'], {
+  triggerCharacters: ['"', "'", '/'],
+  provideCompletionItems(model, position) {
+    // 取光标所在行从行首到光标处的文本，匹配到才提供包名补全；否则交还给 TS 服务
+    const linePrefix = model.getValueInRange({
+      startLineNumber: position.lineNumber,
+      startColumn: 1,
+      endLineNumber: position.lineNumber,
+      endColumn: position.column
+    })
+    if (!IMPORT_SPECIFIER_REGEX.test(linePrefix)) return { suggestions: [] }
+
+    const word = model.getWordUntilPosition(position)
+    const range: monaco.IRange = {
+      startLineNumber: position.lineNumber,
+      startColumn: word.startColumn,
+      endLineNumber: position.lineNumber,
+      endColumn: word.endColumn
+    }
+
+    return {
+      suggestions: BUILTIN_PACKAGES.map((pkg) => ({
+        label: pkg.name,
+        kind: monaco.languages.CompletionItemKind.Module,
+        insertText: pkg.name,
+        detail: pkg.description,
+        documentation: { value: pkg.description },
+        range,
+        // 让我们的内置包排在 TS 默认补全的前面（同字母时）
+        sortText: '0_' + pkg.name
+      }))
+    }
+  }
+})
 
 type Locale = 'en' | 'zh'
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
@@ -144,28 +244,7 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
   }, [isReadOnly, persist, script.id])
 
   const handleMount: OnMount = useCallback((editor) => {
-    // 一次性配置 TS 编译器选项 + extraLib —— Monaco 是单例，重复 setCompilerOptions
-    // 会覆盖前一次，但 addExtraLib 重复 path 也只是替换内容，不会双倍内存。
-    //
-    // 注：monaco-editor 0.55 把 typescript 子命名空间提到顶层（旧的
-    // `monaco.languages.typescript` 仍然可工作但被标 deprecated 导致 TS 报错），
-    // 这里走新的 `monaco.typescript`。
-    monaco.typescript.typescriptDefaults.setCompilerOptions({
-      target: monaco.typescript.ScriptTarget.ES2020,
-      module: monaco.typescript.ModuleKind.ESNext,
-      moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
-      allowNonTsExtensions: true,
-      esModuleInterop: true,
-      strict: false,
-      skipLibCheck: true
-    })
-    monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
-      noSemanticValidation: false,
-      noSyntaxValidation: false
-    })
-    for (const lib of SCRIPT_EDITOR_TYPINGS) {
-      monaco.typescript.typescriptDefaults.addExtraLib(lib.contents, lib.path)
-    }
+    // TS 默认配置 + extraLib 已在模块顶层配置，这里只剩聚焦动作。
     editor.focus()
   }, [])
 
@@ -183,8 +262,9 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
     }
   }, [saveState, errorMessage, t])
 
-  // Monaco 路径用 script id —— 同一编辑器实例切换脚本时模型会重置，避免历史污染
-  const editorPath = useMemo(() => `file:///scripts/${script.id}/index.tsx`, [script.id])
+  // Monaco 模型路径用 script id —— 同一编辑器实例切换脚本时模型会重置，避免历史污染。
+  // 用 `.ts` 而不是 `.tsx`：脚本目前不写 JSX，避免 TS 服务把尖括号当 JSX 起头解析。
+  const editorPath = useMemo(() => `file:///scripts/${script.id}/index.ts`, [script.id])
 
   return (
     <div className="flex h-full flex-col">
@@ -228,7 +308,12 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
               wordWrap: 'on',
               padding: { top: 12, bottom: 12 },
               fontLigatures: true,
-              fontFamily: '"JetBrains Mono", ui-monospace, monospace'
+              fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+              // 父容器有 overflow:hidden（DetailPane / ScriptsView 都设了），
+              // 默认渲染的 hover/补全/参数提示 widget 会被裁切看不到内容。
+              // 这两个 flag 让 widget 渲染到 fixed-position 层逃出 overflow。
+              fixedOverflowWidgets: true,
+              hover: { above: false, sticky: true }
             }}
           />
         )}
