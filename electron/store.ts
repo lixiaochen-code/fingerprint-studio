@@ -30,9 +30,13 @@ function versionId() {
   return `ver_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-function normalizeUrl(url?: string) {
+/**
+ * 把用户输入的 URL 规范化。空值返回 undefined（startUrl 已是可选字段，
+ * 不再回退到 google.com 这种"默认 startUrl"——profile 的语义就是没设置就不打开）。
+ */
+function normalizeUrl(url?: string): string | undefined {
   const value = url?.trim()
-  if (!value) return 'https://www.google.com'
+  if (!value) return undefined
   if (/^https?:\/\//i.test(value)) return value
   return `https://${value}`
 }
@@ -87,12 +91,19 @@ export class ProfileStore {
       password: normalizedPassword
     }
 
+    // startUrl 是可选字段。语义：
+    //   - draft 带 startUrl key（即使是空字符串）→ 用 draft 的值（normalize 后可能 undefined）
+    //   - draft 完全没带这个 key → 保留 existing 的值
+    // 这样既允许新建/编辑时清空，也允许 partial update 不动它。
+    const startUrl = Object.prototype.hasOwnProperty.call(draft, 'startUrl')
+      ? normalizeUrl(draft.startUrl)
+      : existing?.startUrl
+
     const profile: BrowserProfile = {
       id: profileId,
       name: draft.name.trim() || existing?.name || message(`Environment ${this.profiles.length + 1}`, `环境 ${this.profiles.length + 1}`),
-      platform: draft.platform?.trim() || existing?.platform || 'other',
       notes: draft.notes?.trim() || existing?.notes || '',
-      startUrl: normalizeUrl(draft.startUrl || existing?.startUrl),
+      startUrl,
       enabledPluginIds: draft.enabledPluginIds ?? existing?.enabledPluginIds ?? [],
       proxy,
       fingerprint: makeFingerprint({ ...existing?.fingerprint, ...draft.fingerprint }, draft.targetOs),
@@ -123,7 +134,6 @@ export class ProfileStore {
     if (!source) throw new Error(message('Profile not found', '环境不存在'))
     return this.upsert({
       name: `${source.name} (copy)`,
-      platform: source.platform,
       notes: source.notes,
       startUrl: source.startUrl,
       enabledPluginIds: [...source.enabledPluginIds],
@@ -224,13 +234,19 @@ export class ProfileStore {
   private load() {
     try {
       const rawProfiles = fs.existsSync(this.profilesFile)
-        ? JSON.parse(fs.readFileSync(this.profilesFile, 'utf8')) as BrowserProfile[]
+        ? JSON.parse(fs.readFileSync(this.profilesFile, 'utf8')) as Array<BrowserProfile & { platform?: string }>
         : []
-      const normalizedProfiles = rawProfiles.map((profile) => ({
-          ...profile,
-          enabledPluginIds: profile.enabledPluginIds ?? [],
-          fingerprint: makeFingerprint(profile.fingerprint)
-        }))
+      // 迁移历史字段：早期 profile 上有业务 `platform` 标签（amazon/shopify 等），
+      // 现在已经没有这个概念，加载时清掉。同时 startUrl 在历史数据里可能是 `'https://www.google.com'`
+      // 这种"默认值"——不动它（用户主动改才生效），但下次他清空就真的能清空。
+      const normalizedProfiles = rawProfiles.map((raw) => {
+        const { platform: _legacyPlatform, ...rest } = raw
+        return {
+          ...rest,
+          enabledPluginIds: rest.enabledPluginIds ?? [],
+          fingerprint: makeFingerprint(rest.fingerprint)
+        }
+      })
       this.profiles = normalizedProfiles
       if (JSON.stringify(rawProfiles) !== JSON.stringify(normalizedProfiles)) {
         writeJsonAtomic(this.profilesFile, normalizedProfiles)

@@ -237,7 +237,17 @@ function emitCrash(event: BrowserCrashEvent) {
   mainWindow.webContents.send('profiles:crashed', event)
 }
 
-async function launchProfile(profile: BrowserProfile) {
+/**
+ * 判断 profile 是否从未被浏览器启动过。Chromium 第一次启动时会创建
+ * `<user-data-dir>/Default` 子目录；下次启动该目录已存在。这是比 `lastOpenedAt` 更
+ * 准确的"首次"信号——用户清空浏览器数据后能重新触发 startUrl。
+ */
+function isFirstLaunch(profile: BrowserProfile): boolean {
+  const defaultDir = path.join(profile.profilePath, 'Default')
+  return !fs.existsSync(defaultDir)
+}
+
+async function launchProfile(profile: BrowserProfile, options: { openStartUrl?: boolean } = {}) {
   const existing = profileProcesses.get(profile.id)
   if (existing && !existing.killed) {
     await shell.showItemInFolder(profile.profilePath)
@@ -248,7 +258,21 @@ async function launchProfile(profile: BrowserProfile) {
   assertLaunchableBrowser(selection.executable)
 
   const activePlugins = store.activePluginVersions(profile.enabledPluginIds)
-  const args = buildLaunchArgs(profile, selection, activePlugins.map((plugin) => plugin.path), proxyUrl(profile))
+
+  // startUrl 仅在 profile 首次启动时打开（且调用方没显式禁用）。这是产品语义：
+  // 启动网址只用来引导新环境的初始登录页，之后浏览器会恢复上次状态，不再被强制跳转。
+  const wantsStartUrl = options.openStartUrl !== false
+  const initialUrl = wantsStartUrl && profile.startUrl && isFirstLaunch(profile)
+    ? profile.startUrl
+    : undefined
+
+  const args = buildLaunchArgs(
+    profile,
+    selection,
+    activePlugins.map((plugin) => plugin.path),
+    proxyUrl(profile),
+    { initialUrl }
+  )
 
   enableExtensionDeveloperMode(profile.profilePath)
 
@@ -319,7 +343,10 @@ function stopProfile(profileId: string) {
 async function ensureProfileRunningForScript(profile: BrowserProfile): Promise<string> {
   const existing = profileProcesses.get(profile.id)
   if (!existing || existing.killed) {
-    await launchProfile(profile)
+    // 脚本启动浏览器**不**带 startUrl：脚本作者完全自己控制导航，初始 URL 会和
+    // page.goto() 抢同一个 tab。即使是 profile 首次启动（按"仅首次"规则本来会带
+    // startUrl），脚本路径也强制关掉。
+    await launchProfile(profile, { openStartUrl: false })
   }
   const endpoint = await waitForDevToolsEndpoint(profile.profilePath, { timeoutMs: 20_000 })
   return endpoint.webSocketDebuggerUrl

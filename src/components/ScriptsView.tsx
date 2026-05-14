@@ -5,7 +5,8 @@ import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { interpolate } from '@/lib/i18n'
-import type { Script, ScriptDraft, ScriptSource } from '../../electron/types'
+import { ScriptRunPanel } from './ScriptRunPanel'
+import type { BrowserProfile, Script, ScriptDraft, ScriptSource } from '../../electron/types'
 
 // 懒加载：Monaco 是 4MB 级 bundle，只有进入 Scripts 视图后才需要。
 // 配合 vite.config.ts 里的 manualChunks 把它拆成独立 'monaco' chunk。
@@ -118,6 +119,8 @@ export type ScriptsViewProps = {
   locale: Locale
   theme: Theme
   scripts: Script[]
+  profiles: BrowserProfile[]
+  runningProfileIds: Set<string>
   selectedScriptId?: string
   onSelect: (scriptId: string | undefined) => void
   onCreate: (draft: ScriptDraft) => Promise<Script>
@@ -125,7 +128,7 @@ export type ScriptsViewProps = {
 }
 
 export function ScriptsView(props: ScriptsViewProps) {
-  const { locale, theme, scripts, selectedScriptId, onSelect, onCreate, onRemove } = props
+  const { locale, theme, scripts, profiles, runningProfileIds, selectedScriptId, onSelect, onCreate, onRemove } = props
   const t = labels[locale]
 
   const [createOpen, setCreateOpen] = useState<ScriptSource | undefined>()
@@ -198,7 +201,15 @@ export function ScriptsView(props: ScriptsViewProps) {
 
       <section className="flex-1 overflow-hidden">
         {selected ? (
-          <DetailPane script={selected} t={t} locale={locale} theme={theme} onDelete={() => setPendingDelete(selected)} />
+          <DetailPane
+            script={selected}
+            t={t}
+            locale={locale}
+            theme={theme}
+            profiles={profiles}
+            runningProfileIds={runningProfileIds}
+            onDelete={() => setPendingDelete(selected)}
+          />
         ) : (
           <EmptyState message={t.emptyDetail} />
         )}
@@ -252,20 +263,24 @@ function EmptyState({ message }: { message: string }) {
 }
 
 /**
- * 详情面板：顶部元信息条 + Monaco 编辑器（local 可写，external 只读）。
- * Step 3 会在编辑器下方挂运行面板（profile 选择 + 实时日志）。
+ * 详情面板：顶部元信息条 + Monaco 编辑器（local 可写，external 只读）+ 下方运行面板。
+ * 编辑器和运行面板之间用一个简单 60/40 上下分屏；Step 4 之后再考虑加可拖动分隔条。
  */
 function DetailPane({
   script,
   t,
   locale,
   theme,
+  profiles,
+  runningProfileIds,
   onDelete
 }: {
   script: Script
   t: Translations
   locale: Locale
   theme: Theme
+  profiles: BrowserProfile[]
+  runningProfileIds: Set<string>
   onDelete: () => void
 }) {
   const revealInFinder = useCallback(() => {
@@ -294,15 +309,26 @@ function DetailPane({
           </Button>
         </div>
       </header>
-      <div className="flex-1 overflow-hidden">
-        <Suspense fallback={
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-            Loading editor...
-          </div>
-        }>
-          <ScriptEditor script={script} locale={locale} theme={theme} />
-        </Suspense>
+      {/* 上 60% 编辑器 / 下 40% 运行面板。flex-basis + min-h-0 防止 Monaco 内部撑爆父容器 */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 basis-[60%] overflow-hidden">
+          <Suspense fallback={
+            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+              Loading editor...
+            </div>
+          }>
+            <ScriptEditor script={script} locale={locale} theme={theme} />
+          </Suspense>
+        </div>
+        <div className="min-h-0 basis-[40%]">
+          <ScriptRunPanel
+            script={script}
+            profiles={profiles}
+            runningProfileIds={runningProfileIds}
+            locale={locale}
+          />
+        </div>
       </div>
     </div>
   )

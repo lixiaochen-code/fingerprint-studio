@@ -198,7 +198,24 @@ export async function selectKernel(profile: BrowserProfile): Promise<KernelSelec
   throw new KernelMissingError(cloakSupported(host) ? 'cloak' : 'chromium', 'No usable browser kernel is installed')
 }
 
-export function buildLaunchArgs(profile: BrowserProfile, selection: KernelSelection, extensionPaths: string[], proxyUrl: string) {
+export interface BuildLaunchArgsOptions {
+  /**
+   * 启动浏览器时打开的初始 URL。传 undefined / 不传则不附加任何 URL，Chromium 会落到
+   * 新建标签页或恢复上次会话。
+   *
+   * 这里**不**自动读 profile.startUrl —— 是否打开 startUrl 是策略层（main.ts）的决定，
+   * 比如"仅首次启动" / "脚本启动不打开"。kernel 这层只负责机械组装命令行。
+   */
+  initialUrl?: string
+}
+
+export function buildLaunchArgs(
+  profile: BrowserProfile,
+  selection: KernelSelection,
+  extensionPaths: string[],
+  proxyUrl: string,
+  options: BuildLaunchArgsOptions = {}
+) {
   const args = [
     `--user-data-dir=${profile.profilePath}`,
     `--proxy-server=${proxyUrl}`,
@@ -246,7 +263,11 @@ export function buildLaunchArgs(profile: BrowserProfile, selection: KernelSelect
     args.push(`--load-extension=${joined}`)
   }
 
-  args.push(profile.startUrl)
+  // 是否附加初始 URL 由调用方决定；这里只机械追加。不带 URL 时 Chromium 落到
+  // 新建标签页或恢复上次会话，是用户已有数据的可预期行为。
+  if (options.initialUrl) {
+    args.push(options.initialUrl)
+  }
   return args
 }
 

@@ -73,7 +73,6 @@ type Translations = {
   searchPlaceholder: string
   refresh: string
   environment: string
-  platform: string
   proxy: string
   fingerprint: string
   createdAt: string
@@ -102,7 +101,6 @@ type Translations = {
     itbrowser: { title: string; description: string }
     off: { title: string; description: string }
   }
-  platformNames: Record<string, string>
 }
 
 const translations: Record<Locale, Translations> = {
@@ -131,10 +129,9 @@ const translations: Record<Locale, Translations> = {
     secureTitle: 'Fingerprint Mode: Off',
     riskDescription: 'Active kernel: {{kernel}}. Host {{host}}.',
     secureDescription: 'Fingerprint spoofing is disabled.',
-    searchPlaceholder: 'SEARCH BY NAME / PLATFORM / PROXY...',
+    searchPlaceholder: 'SEARCH BY NAME / PROXY...',
     refresh: 'REFRESH',
     environment: 'Environment',
-    platform: 'Platform',
     proxy: 'Proxy',
     fingerprint: 'Fingerprint',
     createdAt: 'Created',
@@ -174,14 +171,6 @@ const translations: Record<Locale, Translations> = {
         title: 'Spoofing disabled',
         description: 'No fingerprint rewriting. Each environment still has an isolated user-data dir and proxy, but all fingerprint surfaces report the real machine.'
       }
-    },
-    platformNames: {
-      amazon: 'AMAZON',
-      shopify: 'SHOPIFY',
-      ebay: 'EBAY',
-      tiktok: 'TIKTOK',
-      walmart: 'WALMART',
-      other: 'OTHER'
     }
   },
   zh: {
@@ -209,10 +198,9 @@ const translations: Record<Locale, Translations> = {
     secureTitle: '指纹模式：关闭',
     riskDescription: '当前内核：{{kernel}}，宿主：{{host}}。',
     secureDescription: '指纹改写已关闭。',
-    searchPlaceholder: '按名称 / 平台 / 代理搜索...',
+    searchPlaceholder: '按名称 / 代理搜索...',
     refresh: '刷新',
     environment: '环境',
-    platform: '平台',
     proxy: '代理',
     fingerprint: '指纹',
     createdAt: '创建时间',
@@ -252,14 +240,6 @@ const translations: Record<Locale, Translations> = {
         title: '未启用',
         description: '不改写指纹。每个环境仍使用独立的 user-data 目录和代理，但所有指纹面都暴露真实机器信息。'
       }
-    },
-    platformNames: {
-      amazon: '亚马逊',
-      shopify: 'Shopify',
-      ebay: 'eBay',
-      tiktok: 'TikTok',
-      walmart: '沃尔玛',
-      other: '其他'
     }
   }
 }
@@ -279,11 +259,6 @@ function initialTheme(): ThemePref {
 function resolveTheme(pref: ThemePref): 'light' | 'dark' {
   if (pref !== 'system') return pref
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function platformLabel(platform: string, locale: Locale) {
-  const names = translations[locale].platformNames as Record<string, string>
-  return names[platform] || platform.toUpperCase()
 }
 
 function targetOsLabel(target: TargetOs, locale: Locale) {
@@ -434,7 +409,7 @@ export function App() {
     const needle = query.trim().toLowerCase()
     if (!needle) return profiles
     return profiles.filter((profile) =>
-      [profile.name, profile.platform, profile.notes, profile.proxy.host].join(' ').toLowerCase().includes(needle)
+      [profile.name, profile.notes, profile.proxy.host, profile.startUrl ?? ''].join(' ').toLowerCase().includes(needle)
     )
   }, [profiles, query])
 
@@ -601,6 +576,8 @@ export function App() {
             locale={locale}
             theme={resolvedTheme}
             scripts={scripts}
+            profiles={profiles}
+            runningProfileIds={runningIds}
             selectedScriptId={selectedScriptId}
             onSelect={setSelectedScriptId}
             onCreate={createScript}
@@ -752,7 +729,6 @@ export function App() {
                       />
                     </th>
                     <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{t.environment}</th>
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[120px]">{t.platform}</th>
                     <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[180px]">{t.proxy}</th>
                     <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[260px]">{t.fingerprint}</th>
                     <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[140px]">{t.createdAt}</th>
@@ -776,14 +752,9 @@ export function App() {
                           <div className="flex flex-col">
                             <span className="font-bold text-sm tracking-tight">{profile.name}</span>
                             <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[200px]">
-                              {profile.notes || profile.startUrl}
+                              {profile.notes || profile.startUrl || '—'}
                             </span>
                           </div>
-                        </td>
-                        <td className="p-4 align-middle">
-                          <span className="inline-flex items-center px-2 py-0.5 bg-muted text-[10px] font-bold font-mono tracking-wider">
-                            {platformLabel(profile.platform, locale)}
-                          </span>
                         </td>
                         <td className="p-4 align-middle">
                           <code className="text-[11px] text-accent font-mono">
@@ -848,7 +819,7 @@ export function App() {
                   })}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="h-32 text-center text-muted-foreground font-mono">
+                      <td colSpan={7} className="h-32 text-center text-muted-foreground font-mono">
                         {t.empty}
                       </td>
                     </tr>

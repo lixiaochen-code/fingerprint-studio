@@ -9,7 +9,6 @@ import type { BrowserPlugin, BrowserProfile, HostOs, ProfileDraft, TargetOs, Tar
 type Locale = 'en' | 'zh'
 
 const targetOsOptions: TargetOsChoice[] = ['random', 'windows', 'mac', 'linux']
-const platformOptions = ['amazon', 'shopify', 'ebay', 'tiktok', 'walmart', 'other']
 
 // Map Electron's hostOs enum to the TargetOs the user can pick. We use this so "Add new"
 // defaults the fingerprint OS to the user's machine — requested product behavior.
@@ -25,10 +24,10 @@ const labels = {
     edit: 'Edit environment',
     name: 'Name',
     namePlaceholder: 'Storefront US 01',
-    platform: 'Platform',
     targetOs: 'Target OS',
-    startUrl: 'Start URL',
+    startUrl: 'Start URL (optional)',
     startUrlPlaceholder: 'https://www.amazon.com',
+    startUrlHint: 'Opened only on the very first launch of this environment. Later launches restore the existing tabs.',
     proxyHost: 'Proxy Host',
     proxyPort: 'Proxy Port',
     proxyUsername: 'Proxy Username',
@@ -47,18 +46,17 @@ const labels = {
     osWindows: 'Windows',
     osMac: 'Mac',
     osLinux: 'Linux',
-    osRandom: 'Random',
-    platformNames: { amazon: 'AMAZON', shopify: 'SHOPIFY', ebay: 'EBAY', tiktok: 'TIKTOK', walmart: 'WALMART', other: 'OTHER' }
+    osRandom: 'Random'
   },
   zh: {
     create: '新建环境',
     edit: '编辑环境',
     name: '名称',
     namePlaceholder: '美区店铺 01',
-    platform: '平台',
     targetOs: '目标系统',
-    startUrl: '启动网址',
+    startUrl: '启动网址（可选）',
     startUrlPlaceholder: 'https://www.amazon.com',
+    startUrlHint: '仅在该环境首次启动时打开。之后启动会恢复上次的标签页，不会再跳转。',
     proxyHost: '代理主机',
     proxyPort: '代理端口',
     proxyUsername: '代理账号',
@@ -77,8 +75,7 @@ const labels = {
     osWindows: 'Windows',
     osMac: 'Mac',
     osLinux: 'Linux',
-    osRandom: '随机',
-    platformNames: { amazon: '亚马逊', shopify: 'Shopify', ebay: 'eBay', tiktok: 'TikTok', walmart: '沃尔玛', other: '其他' }
+    osRandom: '随机'
   }
 } as const
 
@@ -96,7 +93,6 @@ export type ProfileFormDialogProps = {
 
 type FormState = {
   name: string
-  platform: string
   startUrl: string
   proxyHost: string
   proxyPort: string
@@ -110,8 +106,7 @@ type FormState = {
 function blankForm(hostOs: TargetOsChoice): FormState {
   return {
     name: '',
-    platform: 'other',
-    startUrl: 'https://www.google.com',
+    startUrl: '',
     proxyHost: '127.0.0.1',
     proxyPort: '7890',
     proxyUsername: '',
@@ -125,8 +120,7 @@ function blankForm(hostOs: TargetOsChoice): FormState {
 function formFromProfile(profile: BrowserProfile): FormState {
   return {
     name: profile.name,
-    platform: profile.platform,
-    startUrl: profile.startUrl,
+    startUrl: profile.startUrl ?? '',
     proxyHost: profile.proxy.host,
     proxyPort: String(profile.proxy.port),
     proxyUsername: profile.proxy.username ?? '',
@@ -159,8 +153,6 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
     linux: t.osLinux
   }), [t])
 
-  const platformLabels = t.platformNames as Record<string, string>
-
   async function submit() {
     setSubmitting(true)
     setError(undefined)
@@ -168,7 +160,8 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
       const draft: ProfileDraft = {
         id: initial?.id,
         name: form.name.trim() || (mode === 'create' ? `${t.create} ${plugins.length + 1}` : initial?.name || ''),
-        platform: form.platform,
+        // 显式带上 startUrl（即使是空字符串）—— store.upsert 用 hasOwnProperty 判断
+        // 是否要从 existing 继承，传 '' 表示用户清空，传 undefined 表示不动。
         startUrl: form.startUrl,
         notes: form.notes,
         targetOs: form.targetOs,
@@ -229,18 +222,14 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
         <Field label={t.name}>
           <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder={t.namePlaceholder} />
         </Field>
-        <Field label={t.platform}>
-          <Select value={form.platform} onChange={(value) => setForm((prev) => ({ ...prev, platform: value }))}
-            options={platformOptions.map((option) => ({ value: option, label: platformLabels[option] || option.toUpperCase() }))}
-          />
-        </Field>
         <Field label={t.targetOs}>
           <Select value={form.targetOs} onChange={(value) => setForm((prev) => ({ ...prev, targetOs: value as TargetOsChoice }))}
             options={targetOsOptions.map((option) => ({ value: option, label: targetLabel[option] }))}
           />
         </Field>
-        <Field label={t.startUrl}>
+        <Field label={t.startUrl} className="md:col-span-2">
           <Input value={form.startUrl} onChange={(e) => setForm((prev) => ({ ...prev, startUrl: e.target.value }))} placeholder={t.startUrlPlaceholder} />
+          <p className="text-[11px] text-muted-foreground">{t.startUrlHint}</p>
         </Field>
         <Field label={t.proxyHost}>
           <Input value={form.proxyHost} onChange={(e) => setForm((prev) => ({ ...prev, proxyHost: e.target.value }))} placeholder="127.0.0.1" />

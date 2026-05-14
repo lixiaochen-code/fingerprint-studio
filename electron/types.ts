@@ -41,9 +41,13 @@ export type FingerprintConfig = {
 export type BrowserProfile = {
   id: string
   name: string
-  platform: string
   notes: string
-  startUrl: string
+  /**
+   * 可选：profile 第一次启动时打开的 URL。后续启动（无论 GUI 还是脚本触发）都不再
+   * 重复打开这个 URL —— 浏览器自身会恢复上次会话或停在新建标签页。判断"首次"的
+   * 信号是 profile user-data 目录里有没有 Chromium 写过的 Default 文件夹。
+   */
+  startUrl?: string
   enabledPluginIds: string[]
   proxy: ProxyConfig
   fingerprint: FingerprintConfig
@@ -113,7 +117,6 @@ export type RuntimeInfo = {
 export type ProfileDraft = {
   id?: string
   name: string
-  platform?: string
   notes?: string
   startUrl?: string
   enabledPluginIds?: string[]

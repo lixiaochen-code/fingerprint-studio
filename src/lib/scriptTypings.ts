@@ -34,9 +34,9 @@ declare module 'auto-registry' {
   export interface Profile {
     id: string
     name: string
-    platform: string
     notes: string
-    startUrl: string
+    /** 启动网址。可选；profile 第一次启动时打开，之后不再弹。 */
+    startUrl?: string
     proxy: { host: string; port: number; username?: string; password?: string }
     profilePath: string
     createdAt: string

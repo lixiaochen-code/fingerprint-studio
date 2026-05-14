@@ -16,7 +16,6 @@ const labels = {
     sectionPlugins: 'Plugins',
     sectionMeta: 'Storage',
     name: 'Name',
-    platform: 'Platform',
     notes: 'Notes',
     startUrl: 'Start URL',
     proxyUrl: 'Endpoint',
@@ -56,7 +55,6 @@ const labels = {
     sectionPlugins: '插件',
     sectionMeta: '存储',
     name: '名称',
-    platform: '平台',
     notes: '备注',
     startUrl: '启动网址',
     proxyUrl: '地址',
@@ -137,8 +135,7 @@ function ProfileBlock({ profile, plugins, t, showName }: { profile: BrowserProfi
       <div className="grid gap-x-6 gap-y-4 p-4 md:grid-cols-2">
         <Group title={t.sectionBasic}>
           <Row label={t.name} value={profile.name} />
-          <Row label={t.platform} value={profile.platform.toUpperCase()} />
-          <Row label={t.startUrl} value={profile.startUrl} />
+          <Row label={t.startUrl} value={profile.startUrl || t.none} />
           <Row label={t.notes} value={profile.notes || t.none} />
         </Group>
         <Group title={t.sectionProxy}>
