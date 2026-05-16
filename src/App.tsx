@@ -582,6 +582,7 @@ export function App() {
             onSelect={setSelectedScriptId}
             onCreate={createScript}
             onRemove={removeScript}
+            onGoToEnvironments={() => setView('profiles')}
           />
         </div>
         <Toaster theme={resolvedTheme} position="top-right" richColors closeButton />

@@ -228,6 +228,25 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
     }
   }, [])
 
+  /**
+   * 立即落盘：取消挂起的 debounce，立刻 writeSource。Cmd/Ctrl+S 用。
+   * external 脚本只读，调用这个函数应该是 no-op。
+   */
+  const flushSave = useCallback(() => {
+    if (isReadOnly) return
+    if (debounceTimerRef.current !== undefined) {
+      window.clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = undefined
+    }
+    if (source === undefined) return
+    void persist(script.id, source)
+  }, [isReadOnly, persist, script.id, source])
+
+  // flushSave 的最新版本放进 ref，让 Monaco 注册的命令始终调到最新闭包
+  // （editor.addAction 注册一次后无法替换，闭包必须自己手动追新）
+  const flushSaveRef = useRef(flushSave)
+  flushSaveRef.current = flushSave
+
   const onChange = useCallback((value: string | undefined) => {
     if (value === undefined) return
     setSource(value)
@@ -244,7 +263,14 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
   }, [isReadOnly, persist, script.id])
 
   const handleMount: OnMount = useCallback((editor) => {
-    // TS 默认配置 + extraLib 已在模块顶层配置，这里只剩聚焦动作。
+    // Cmd/Ctrl+S 立即保存，不等 500ms debounce。Monaco 通过 ref 拿最新 flushSave，
+    // 避免每次 source 变化都重新注册 action。
+    editor.addAction({
+      id: 'auto-registry.save-script',
+      label: 'Save script',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+      run: () => flushSaveRef.current()
+    })
     editor.focus()
   }, [])
 

@@ -13,7 +13,9 @@ type Translations = {
   panelTitle: string
   selectProfilesHint: string
   noProfiles: string
+  noProfilesAction: string
   run: string
+  runHint: string
   stopAll: string
   stop: string
   emptyRuns: string
@@ -33,8 +35,10 @@ const labels: Record<Locale, Translations> = {
   en: {
     panelTitle: 'Run',
     selectProfilesHint: 'Pick environments to run this script on:',
-    noProfiles: 'No environments yet. Create one in the Environments tab first.',
+    noProfiles: 'No environments yet.',
+    noProfilesAction: 'Go create one in the Environments tab.',
     run: 'Run',
+    runHint: 'Cmd/Ctrl + Enter',
     stopAll: 'Stop all',
     stop: 'Stop',
     emptyRuns: 'No runs yet. Select environments above and press Run.',
@@ -52,8 +56,10 @@ const labels: Record<Locale, Translations> = {
   zh: {
     panelTitle: '运行',
     selectProfilesHint: '选择要运行此脚本的环境：',
-    noProfiles: '还没有环境，先去环境列表新建一个。',
+    noProfiles: '还没有环境。',
+    noProfilesAction: '去环境列表新建一个。',
     run: '运行',
+    runHint: 'Cmd/Ctrl + Enter',
     stopAll: '全部停止',
     stop: '停止',
     emptyRuns: '还没有运行记录。在上方选择环境，点"运行"。',
@@ -120,6 +126,8 @@ export type ScriptRunPanelProps = {
   profiles: BrowserProfile[]
   runningProfileIds: Set<string>
   locale: Locale
+  /** 空态时点击"去新建环境"的回调；未提供则按钮不显示 */
+  onGoToEnvironments?: () => void
 }
 
 /**
@@ -132,7 +140,7 @@ export type ScriptRunPanelProps = {
  * - profile 多选：复用现有 BrowserProfile 列表；勾上的并发 run
  * - "Stop all" 仅停本面板范围内的 run（不调 stopAll IPC，那是全局清理）
  */
-export function ScriptRunPanel({ script, profiles, runningProfileIds, locale }: ScriptRunPanelProps) {
+export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, onGoToEnvironments }: ScriptRunPanelProps) {
   const t = labels[locale]
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set())
   const [liveRuns, setLiveRuns] = useState<LiveRun[]>([])
@@ -245,6 +253,25 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale }: 
     }
   }, [script.id, selectedProfileIds, profileById, t])
 
+  // ref 跟踪 runSelected 最新版，让全局 keydown 监听器读到最新闭包
+  const runSelectedRef = useRef(runSelected)
+  runSelectedRef.current = runSelected
+
+  // Cmd/Ctrl + Enter 触发 Run（仅在面板挂载期间生效；切走脚本会卸载并清理监听）
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const isAccel = event.metaKey || event.ctrlKey
+      if (!isAccel || event.key !== 'Enter') return
+      // 编辑器里按 Cmd+Enter 也算（Monaco 不消费这个组合）；若用户正在 input 输入则放过
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      event.preventDefault()
+      void runSelectedRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const stopRun = useCallback(async (runId: string) => {
     await window.registry.scripts.stop(runId)
   }, [])
@@ -294,6 +321,7 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale }: 
         onRun={() => void runSelected()}
         busy={busy}
         t={t}
+        onGoToEnvironments={onGoToEnvironments}
       />
 
       <div className="flex-1 overflow-hidden">
@@ -320,7 +348,8 @@ function ProfileSelector({
   onToggle,
   onRun,
   busy,
-  t
+  t,
+  onGoToEnvironments
 }: {
   profiles: BrowserProfile[]
   runningProfileIds: Set<string>
@@ -329,11 +358,21 @@ function ProfileSelector({
   onRun: () => void
   busy: boolean
   t: Translations
+  onGoToEnvironments?: () => void
 }) {
   if (profiles.length === 0) {
     return (
       <div className="border-b border-border bg-secondary/10 px-4 py-3">
         <p className="text-[11px] text-muted-foreground">{t.noProfiles}</p>
+        {onGoToEnvironments && (
+          <button
+            type="button"
+            className="mt-1 text-[11px] text-primary underline-offset-2 hover:underline"
+            onClick={onGoToEnvironments}
+          >
+            {t.noProfilesAction}
+          </button>
+        )}
       </div>
     )
   }
@@ -372,10 +411,12 @@ function ProfileSelector({
           )
         })}
         <div className="ml-auto">
-          <Button size="sm" disabled={busy || selected.size === 0} onClick={onRun}>
-            <Play className="mr-1 h-3 w-3 fill-current" />
-            {t.run}
-          </Button>
+          <Tooltip side="top" content={t.runHint}>
+            <Button size="sm" disabled={busy || selected.size === 0} onClick={onRun}>
+              <Play className="mr-1 h-3 w-3 fill-current" />
+              {t.run}
+            </Button>
+          </Tooltip>
         </div>
       </div>
     </div>
@@ -387,6 +428,18 @@ function RunRow({ entry, t, onStop }: { entry: LiveRun; t: Translations; onStop:
   const logRef = useRef<HTMLDivElement | null>(null)
   // 用户是否手动滚动过——之后的新日志只在用户在底部时自动跟。
   const stuckToBottomRef = useRef(true)
+
+  const status = entry.run.status
+  const finished = isFinished(status)
+
+  // RUNNING 状态下每秒触发一次重渲染，让"已运行 Ns"的秒数实时跳动。
+  // 结束之后停掉定时器，节省渲染。
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (finished) return
+    const id = window.setInterval(() => setTick((value) => value + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [finished])
 
   // 自动滚到底
   useEffect(() => {
@@ -401,8 +454,6 @@ function RunRow({ entry, t, onStop }: { entry: LiveRun; t: Translations; onStop:
     stuckToBottomRef.current = distanceFromBottom < 12
   }, [])
 
-  const status = entry.run.status
-  const finished = isFinished(status)
   const statusLabel = (() => {
     switch (status) {
       case 'pending': return t.status_pending
@@ -418,7 +469,8 @@ function RunRow({ entry, t, onStop }: { entry: LiveRun; t: Translations; onStop:
     const end = entry.run.endedAt ? new Date(entry.run.endedAt).getTime() : Date.now()
     const seconds = Math.max(0, Math.round((end - start) / 1000))
     return interpolate(t.durationSec, { seconds: String(seconds) })
-  }, [entry.run.startedAt, entry.run.endedAt, t, status])
+    // tick 是为了运行中的行每秒重算，依赖 lint 不会高兴，所以显式列入
+  }, [entry.run.startedAt, entry.run.endedAt, t, tick])
 
   return (
     <li className="flex flex-col">

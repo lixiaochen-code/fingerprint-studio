@@ -6,10 +6,9 @@
 ## 0. 当前快照
 
 - **分支**：`main`
-- **远端最新提交**：`b2b46d6`（已 push）—— Phase 3 Step 3 运行面板 + 平台/启动网址重构
-- **工作树**：干净
-- **完成进度**：Phase 3 的 4 步里已落地 Step 1（列表 + CRUD）/ Step 2（Monaco 编辑器）/ Step 3（运行面板）的代码。Step 4（润色）未做。
-- **未做的事**：所有手工 UI 验证（§10 / §10b / §10c）— 换机后第一件事就是把 §10c 走一遍，那是最近一次改动覆盖最广的一份清单。
+- **远端最新提交**：Phase 3 Step 4 润色（待 commit / push）
+- **完成进度**：Phase 3 全部 4 步代码已落地。
+- **未做的事**：手工 UI 验证 Step 3 + Step 4。新机器接手第一件事是把 §10c（Step 3 + 重构）+ §10d（Step 4）一起跑一遍。
 
 换机操作：
 
@@ -17,7 +16,7 @@
 git clone / git pull
 pnpm install
 pnpm run build              # sanity check — 必绿（首次 build Monaco 大 chunk 需要 30-40s）
-pnpm run dev                # 启动应用，按 §10c 走 UI
+pnpm run dev                # 启动应用，按 §10c §10d 走 UI
 ```
 
 ---
@@ -207,7 +206,7 @@ import { z } from 'zod'
 | 2 | Monaco Editor + 类型补全 + hover + 包名补全 | ✅ 已 push（`af18c56` 修复合并） |
 | 3 | 运行面板：多选 profile、并发 run、实时日志流、stop/stopAll | ✅ 代码已 push（`b2b46d6`），**未手测** |
 | 平台/startUrl 重构 | 删 `BrowserProfile.platform`，startUrl 改"仅首次启动" | ✅ 代码已 push（`b2b46d6`），**未手测** |
-| 4 | 细节润色：可拖动分隔条、日志颜色精细化、滚动贴底、快捷键、空态 | ⏳ |
+| 4 | 可拖动分隔条、运行中时长每秒刷新、Cmd+S/Cmd+Enter 快捷键、空态去新建环境引导 | ✅ 代码已落（待 commit），**未手测** |
 
 Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
@@ -280,20 +279,48 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
 ---
 
-## 11. Phase 3 Step 4 预告
+## 11. **Phase 3 Step 4 验证清单**（未跑）
 
-只有 §10c 全绿才进。润色项：
+`pnpm run dev` 进 Scripts tab，选个有源码的脚本（前面建过的 `smoke`/`loop`）。
 
-- 可拖动分隔条（替代当前 60/40 固定）
-- 日志按 level 区分背景色 / 折行处理
-- 长行截断 + 鼠标悬停展开
-- 关闭 / 切走 Scripts tab 时清理 `onEvent` 订阅 + 防内存泄漏
-- 空态引导更友好（无 profile 时给一个"去新建环境"的链接）
-- 快捷键：Cmd/Ctrl+S 立即保存（不等 debounce），Cmd/Ctrl+Enter Run
+### 可拖动分隔条
+1. 编辑器和运行面板之间有一道细灰色分隔条，hover 变色
+2. 鼠标拖动分隔条 → 上下比例改变，光标变 `row-resize`
+3. 松开后比例保持
+4. 关掉应用 + `pnpm run dev` 重启 → 比例还在（localStorage 持久化）
+5. 拖太极端时停在 25% / 85%（minRatio / maxRatio）
+
+### 快捷键
+6. 编辑器里改一个字符 → 立刻 `Cmd+S`（Mac） / `Ctrl+S`（Win/Linux）→ 状态徽章直接 `Saved`，不等 500ms
+7. 选一个 profile → 按 `Cmd+Enter` / `Ctrl+Enter`（光标在编辑器或面板都行）→ 触发 Run
+8. 在普通文本输入框（比如新建对话框的 Name 输入）按 `Cmd+Enter` 不应触发 Run（避免抢键）
+9. Run 按钮 hover 显示 tooltip "Cmd/Ctrl + Enter"
+
+### 运行中时长实时刷新
+10. 跑 loop 脚本 → RUNNING 行右侧的"X 秒"应该每秒 +1（不再是 0s 卡住）
+11. Stop 后秒数停止增长，停在结束时刻
+
+### 空态引导
+12. 删光所有环境（先把 profile 全删）→ Scripts tab 选脚本 → 运行面板 ProfileSelector 区域显示 "还没有环境。" + 蓝色链接 "去环境列表新建一个。"
+13. 点链接 → 自动切到 Environments tab
+
+### 回归
+14. §10c 那 21 项整套，在新版本下应该完全不退化
 
 ---
 
-## 12. 环境 & 依赖状态
+## 12. Phase 3 收尾后的下一步
+
+`§11` 全绿后 Phase 3 Done。后续候选（按优先级，等用户拍板）：
+
+- **Phase 4 Dev Server**：本地 HTTP/WebSocket 让外部 VSCode 项目通过 `auto-registry-sdk-client` 包反向调用应用 SDK
+- **Phase 5 模板市场**：预设 3-5 个常用脚本（Amazon 登录、采集、批量操作）
+- **代理连通性测试按钮**（pending 已久）
+- **集中日志到 `<userData>/logs/`**（pending 已久）
+
+---
+
+## 13. 环境 & 依赖状态
 
 - Node：~~20.x~~（Electron 39 内置的 Node）；本地 build 用 `cross-env NODE_OPTIONS=--max-old-space-size=8192`，Monaco 大 bundle 默认堆装不下
 - pnpm：9.15+ / 11+ 都行，lockfile 兼容
@@ -306,29 +333,29 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
 ---
 
-## 13. 对 AI agent 的接手指令
+## 14. 对 AI agent 的接手指令
 
 你读到这里时的首要任务：
 
 1. **不要**回顾聊天历史，以本文件 + `docs/specs/scripting.md` + 规范文档为准
 2. **不要**主动重构现有代码，除非用户明确要求
-3. **默认行为**：等用户说"继续 Step 4" / "换方向做 X"之前，别自己发起改动
-4. **用户一来就说"继续"的话**，先指引他跑 §10c 验证清单（最近一波改动还没人手测过），全通过后再进 Step 4
+3. **默认行为**：等用户说"换方向" / 进具体下一步之前，别自己发起改动
+4. **用户一来就说"继续"的话**，先指引他跑 §10c §11 验证清单（Step 3+4 还没人手测过），全通过后才 Phase 3 Done
 5. 开工前确认 `pnpm run build` 本机能跑通，**这是接手线的第一个 sanity check**
 6. 任何改动后 `pnpm run build` 必绿（规范第 11 节）
 7. 遇到 §6 那些 bug 类似的症状时，直接翻表对应处理，不要再调试一遍
 
 ---
 
-## 14. 用户视角的"我现在该做什么"
+## 15. 用户视角的"我现在该做什么"
 
 按时间顺序：
 
 1. **换机后**：拉代码 → `pnpm install` → `pnpm run build` 确认绿 → `pnpm run dev` 启动
-2. **跑 §10c 验证清单**（21 项）
-3. 哪一项不对：贴给 agent，先修再下一步
-4. 全绿：告诉 agent "通过，继续 Step 4"
-5. Step 4 完成后 → 同样跑一遍 UI 测试 → 决定是不是收尾 Phase 3，进 Phase 4 Dev Server 或先停一停
+2. **跑 §10c 验证清单**（21 项，Step 3 + 重构）
+3. **跑 §11 验证清单**（14 项，Step 4 润色）
+4. 哪一项不对：贴给 agent，先修再下一步
+5. 全绿：Phase 3 Done，告诉 agent 进 §12 的下一步候选
 
 ---
 

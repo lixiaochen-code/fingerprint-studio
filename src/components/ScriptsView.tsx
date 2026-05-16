@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
+import { SplitPane } from '@/components/ui/SplitPane'
 import { interpolate } from '@/lib/i18n'
 import { ScriptRunPanel } from './ScriptRunPanel'
 import type { BrowserProfile, Script, ScriptDraft, ScriptSource } from '../../electron/types'
@@ -125,10 +126,12 @@ export type ScriptsViewProps = {
   onSelect: (scriptId: string | undefined) => void
   onCreate: (draft: ScriptDraft) => Promise<Script>
   onRemove: (scriptId: string) => Promise<void>
+  /** 空态下点击"去新建环境"的回调；交给 App 切到 environments tab */
+  onGoToEnvironments?: () => void
 }
 
 export function ScriptsView(props: ScriptsViewProps) {
-  const { locale, theme, scripts, profiles, runningProfileIds, selectedScriptId, onSelect, onCreate, onRemove } = props
+  const { locale, theme, scripts, profiles, runningProfileIds, selectedScriptId, onSelect, onCreate, onRemove, onGoToEnvironments } = props
   const t = labels[locale]
 
   const [createOpen, setCreateOpen] = useState<ScriptSource | undefined>()
@@ -209,6 +212,7 @@ export function ScriptsView(props: ScriptsViewProps) {
             profiles={profiles}
             runningProfileIds={runningProfileIds}
             onDelete={() => setPendingDelete(selected)}
+            onGoToEnvironments={onGoToEnvironments}
           />
         ) : (
           <EmptyState message={t.emptyDetail} />
@@ -273,7 +277,8 @@ function DetailPane({
   theme,
   profiles,
   runningProfileIds,
-  onDelete
+  onDelete,
+  onGoToEnvironments
 }: {
   script: Script
   t: Translations
@@ -282,6 +287,7 @@ function DetailPane({
   profiles: BrowserProfile[]
   runningProfileIds: Set<string>
   onDelete: () => void
+  onGoToEnvironments?: () => void
 }) {
   const revealInFinder = useCallback(() => {
     void window.registry.scripts.revealInFinder(script.entryPath)
@@ -309,9 +315,15 @@ function DetailPane({
           </Button>
         </div>
       </header>
-      {/* 上 60% 编辑器 / 下 40% 运行面板。flex-basis + min-h-0 防止 Monaco 内部撑爆父容器 */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 basis-[60%] overflow-hidden">
+      {/* 上半编辑器 / 下半运行面板，可拖动调整比例。比例存 localStorage 跨会话保留 */}
+      <SplitPane
+        direction="vertical"
+        defaultRatio={0.6}
+        minRatio={0.25}
+        maxRatio={0.85}
+        storageKey="auto-registry.scripts.editor-run-ratio"
+        className="flex-1"
+        first={
           <Suspense fallback={
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
               <Loader2 className="mr-2 h-3 w-3 animate-spin" />
@@ -320,16 +332,17 @@ function DetailPane({
           }>
             <ScriptEditor script={script} locale={locale} theme={theme} />
           </Suspense>
-        </div>
-        <div className="min-h-0 basis-[40%]">
+        }
+        second={
           <ScriptRunPanel
             script={script}
             profiles={profiles}
             runningProfileIds={runningProfileIds}
             locale={locale}
+            onGoToEnvironments={onGoToEnvironments}
           />
-        </div>
-      </div>
+        }
+      />
     </div>
   )
 }
