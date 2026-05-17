@@ -23,6 +23,7 @@ import { ensureDirs, pluginsRoot } from './paths'
 import { ScriptStore } from './scripts/store'
 import { ScriptRuntimeManager, ProfileBusyError, type ScriptRuntimeEvent } from './scripts/runtime'
 import { runStartupJanitor } from './scripts/janitor'
+import { testProxy } from './proxyTest'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
 
 const isDev = !app.isPackaged
@@ -445,6 +446,11 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('profiles:stop', (_event, id: string) => stopProfile(id))
+  // 代理连通性检测：直接在主进程跑 CONNECT 测试，不开浏览器 / 不污染 profile。
+  // 用户在 ProfileFormDialog 里点"测试"按钮时调用。
+  ipcMain.handle('proxy:test', (_event, config: { host: string; port: number; username?: string; password?: string }) =>
+    testProxy(config)
+  )
   ipcMain.handle('plugins:list', () => store.listPlugins())
   ipcMain.handle('plugins:importZip', () => importPluginZip())
   ipcMain.handle('plugins:setActiveVersion', (_event, pluginId: string, versionId: string) => store.setActivePluginVersion(pluginId, versionId))

@@ -392,8 +392,27 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
 - **Phase 4 Dev Server**：本地 HTTP/WebSocket 让外部 VSCode 项目通过 `auto-registry-sdk-client` 包反向调用应用 SDK
 - **Phase 5 模板市场**：预设 3-5 个常用脚本（Amazon 登录、采集、批量操作）
-- **代理连通性测试按钮**（pending 已久）
+- ✅ ~~代理连通性测试按钮~~ —— 已实装（见 §11c）
 - **集中日志到 `<userData>/logs/`**（pending 已久）
+
+---
+
+## 11c. 代理连通性测试（已实装）
+
+新建/编辑环境对话框右下加了"测试连通性"按钮。
+
+实现：
+- `electron/proxyTest.ts`：用裸 `net.Socket` 走 HTTP CONNECT 到 `www.gstatic.com:443`，5s 超时；不依赖 puppeteer / 不开浏览器；返回 `{ ok, latencyMs?, code, message? }`
+- `proxy:test` IPC + `window.registry.proxy.test()` preload 桥
+- `ProfileFormDialog`：状态局部 `proxyTest`；用户改任何代理字段都会重置回 null（避免旧结果误导）；按钮带 spinner；成功显示 primary 绿色"可达 · X 毫秒"；失败按 code 分文案（TIMEOUT/REFUSED/AUTH/BAD_HOST/BAD_RESPONSE/UNKNOWN）
+
+**验证清单**（5 项）：
+
+1. 新建环境，host=`127.0.0.1` port=`7890`（你本机的代理） → 点测试 → 显示绿色"可达 · X 毫秒"
+2. 改成不存在的端口（比如 6666）→ 重新点 → 显示红色 `TIMEOUT` 或 `REFUSED`
+3. 改成不存在的 host（`no-such-host.invalid`）→ 显示红色 `BAD_HOST`
+4. 故意填错代理账号密码（如果代理需要认证）→ 显示红色 `AUTH`
+5. 任意修改 host/port/account/password → 旧的绿/红徽章应**立即消失**（不能挂在 UI 上误导）
 
 ---
 
@@ -432,8 +451,9 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 2. **跑 §10c 验证清单**（21 项，Step 3 + 重构）
 3. **跑 §11 验证清单**（14 项，Step 4 润色）
 4. **跑 §11b 验证清单**（21 项，占用规则三步走）
-5. 哪一项不对：贴给 agent，先修再下一步
-6. 全绿：Phase 3 Done，告诉 agent 进 §12 的下一步候选
+5. **跑 §11c 验证清单**（5 项，代理连通性测试）
+6. 哪一项不对：贴给 agent，先修再下一步
+7. 全绿：Phase 3 Done，告诉 agent 进 §12 的下一步候选
 
 ---
 

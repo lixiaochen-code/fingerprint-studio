@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, ProxyConfig, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
 import type { ScriptRuntimeEvent } from './scripts/runtime'
+import type { ProxyTestResult } from './proxyTest'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
 /**
@@ -41,6 +42,9 @@ const api = {
     importZip: () => ipcRenderer.invoke('plugins:importZip') as Promise<BrowserPlugin | undefined>,
     setActiveVersion: (pluginId: string, versionId: string) => ipcRenderer.invoke('plugins:setActiveVersion', pluginId, versionId) as Promise<void>,
     remove: (pluginId: string) => ipcRenderer.invoke('plugins:remove', pluginId) as Promise<void>
+  },
+  proxy: {
+    test: (config: ProxyConfig) => ipcRenderer.invoke('proxy:test', config) as Promise<ProxyTestResult>
   },
   runtime: {
     info: () => ipcRenderer.invoke('runtime:info') as Promise<RuntimeInfo>

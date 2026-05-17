@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from '../electron/types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, ProxyConfig, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from '../electron/types'
 import type { ScriptRuntimeEvent } from '../electron/scripts/runtime'
+import type { ProxyTestResult } from '../electron/proxyTest'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
 type ScriptRunResult =
@@ -34,6 +35,9 @@ declare global {
         importZip: () => Promise<BrowserPlugin | undefined>
         setActiveVersion: (pluginId: string, versionId: string) => Promise<void>
         remove: (pluginId: string) => Promise<void>
+      }
+      proxy: {
+        test: (config: ProxyConfig) => Promise<ProxyTestResult>
       }
       runtime: {
         info: () => Promise<RuntimeInfo>
