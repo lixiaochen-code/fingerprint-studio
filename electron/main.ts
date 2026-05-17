@@ -21,7 +21,8 @@ import {
 import { cancelInstall, installKernel, isInstalling } from './downloader'
 import { ensureDirs, pluginsRoot } from './paths'
 import { ScriptStore } from './scripts/store'
-import { ScriptRuntimeManager, type ScriptRuntimeEvent } from './scripts/runtime'
+import { ScriptRuntimeManager, ProfileBusyError, type ScriptRuntimeEvent } from './scripts/runtime'
+import { runStartupJanitor } from './scripts/janitor'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
 
 const isDev = !app.isPackaged
@@ -361,6 +362,9 @@ function serializeError(error: unknown) {
   if (error instanceof KernelMissingError) {
     return error.toJSON()
   }
+  if (error instanceof ProfileBusyError) {
+    return error.toJSON()
+  }
   if (error instanceof Error) {
     return { message: error.message }
   }
@@ -369,6 +373,9 @@ function serializeError(error: unknown) {
 
 app.whenReady().then(async () => {
   ensureDirs()
+  // 启动自检：清掉上次会话的孤儿脚本子进程 + Chromium SingletonLock 残留。
+  // 主进程被 SIGKILL / 断电 / dev 重启时这些痕迹清不掉，会导致下次启动浏览器卡住。
+  await runStartupJanitor()
   store = new ProfileStore()
   scriptStore = new ScriptStore()
   scriptRuntime = new ScriptRuntimeManager(scriptStore)
@@ -460,6 +467,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('scripts:list', () => scriptStore.list())
   ipcMain.handle('scripts:listRuns', () => scriptStore.listRuns())
   ipcMain.handle('scripts:activeRuns', () => scriptRuntime.listActive())
+  ipcMain.handle('scripts:activeByProfile', (_event, profileId: string) =>
+    scriptRuntime.getActiveByProfile(profileId)
+  )
   ipcMain.handle('scripts:save', (_event, draft: ScriptDraft): Script => scriptStore.upsert(draft))
   ipcMain.handle('scripts:remove', (_event, id: string) => {
     // 杀掉该脚本所有活跃 run，再删

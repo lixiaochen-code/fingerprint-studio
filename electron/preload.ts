@@ -3,7 +3,22 @@ import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallPro
 import type { ScriptRuntimeEvent } from './scripts/runtime'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
-type ScriptRunResult = { ok: true; run: ScriptRun } | { ok: false; error: { message: string } }
+/**
+ * scripts:run 的返回结构。错误情况下：
+ * - code='PROFILE_BUSY' + occupiedBy 字段：目标 profile 已被另一个 run 占用。
+ *   渲染层应该弹友好 toast，必要时跳到 occupiedBy.scriptId 那个脚本面板。
+ * - code 缺省：其它启动失败（profile 不存在 / 内核未装 / etc.）
+ */
+type ScriptRunResult =
+  | { ok: true; run: ScriptRun }
+  | {
+      ok: false
+      error: {
+        message: string
+        code?: string
+        occupiedBy?: { runId: string; scriptId: string }
+      }
+    }
 
 const api = {
   profiles: {
@@ -44,6 +59,8 @@ const api = {
     list: () => ipcRenderer.invoke('scripts:list') as Promise<Script[]>,
     listRuns: () => ipcRenderer.invoke('scripts:listRuns') as Promise<ScriptRun[]>,
     activeRuns: () => ipcRenderer.invoke('scripts:activeRuns') as Promise<ScriptRun[]>,
+    activeByProfile: (profileId: string) =>
+      ipcRenderer.invoke('scripts:activeByProfile', profileId) as Promise<ScriptRun | undefined>,
     save: (draft: ScriptDraft) => ipcRenderer.invoke('scripts:save', draft) as Promise<Script>,
     remove: (id: string) => ipcRenderer.invoke('scripts:remove', id) as Promise<void>,
     readSource: (id: string) => ipcRenderer.invoke('scripts:readSource', id) as Promise<string>,

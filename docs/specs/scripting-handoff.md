@@ -6,9 +6,44 @@
 ## 0. 当前快照
 
 - **分支**：`main`
-- **远端最新提交**：Phase 3 Step 4 润色（待 commit / push）
-- **完成进度**：Phase 3 全部 4 步代码已落地。
-- **未做的事**：手工 UI 验证 Step 3 + Step 4。新机器接手第一件事是把 §10c（Step 3 + 重构）+ §10d（Step 4）一起跑一遍。
+- **远端最新提交**：Phase 3 Step 4 + 占用规则三步走（待 commit / push 本轮改动）
+- **完成进度**：Phase 3 全部 4 步代码已落地；脚本占用规则三步走代码已落地。
+- **未做的事**：手工 UI 验证 Step 3、Step 4 + 占用规则。新机器接手第一件事是把 §10c（Step 3 + 重构）+ §11（Step 4）+ §11b（占用规则）一起跑一遍。
+
+## 0a. 占用规则（最新一轮）
+
+闭环原则（用户拍板）：
+
+1. **一个 profile 同一时刻最多 1 个活跃 ScriptRun**。GUI 启动的浏览器**不算占用**——脚本可以接管 GUI 启动的浏览器，但脚本运行期间该 profile 不能被另一个脚本"再占一次"。
+2. UI 表达：
+   - **Header** 加一个 Activity 图标按钮（`ActiveRunsButton`），右上角徽章显示活跃 run 总数；点开浮层列出所有跨脚本运行中的 run，每条带"打开脚本"和"停止"按钮。
+   - **Environments 列表** Status 列：被脚本占用时显示一个**点击可跳转**的 amber `SCRIPTING` 徽章（替代 ONLINE/OFFLINE）。
+   - **Scripts 面板 ProfileSelector**：被另一脚本占用的 chip 灰显 + amber 边框 + Tooltip 提示占用脚本名；勾选/Run 都不可点。
+3. 状态来源：主进程 `ScriptRuntimeManager` 是唯一真源，每次活跃集变化广播 `'active-changed'` 事件携带最新 `ScriptRun[]`。`App` 顶层订阅一次，向下分发。
+
+实现摘要：
+
+- `electron/scripts/runtime.ts`
+  - 加 `ProfileBusyError`（`code='PROFILE_BUSY'`，带 `occupiedBy: { runId, scriptId }`）
+  - `start()` 入口先 `getActiveByProfile()` 检查互斥
+  - 新增 `listActive()` / `getActiveByProfile(profileId)`
+  - 启动 + `handleExit()` 时 `emitActiveChanged()` 广播
+- `electron/scripts/janitor.ts`（新文件）
+  - 启动自检：通过 `ps -E` 匹配 `AUTO_REGISTRY_SCRIPT_CONTEXT` env 杀掉孤儿脚本子进程
+  - 清掉所有 profile 目录里的 `Singleton*` 文件（`SingletonLock`/`SingletonCookie`/`SingletonSocket`），避免上次会话残留卡住下次启动
+- `electron/main.ts`
+  - `whenReady` 里第一件事 `await runStartupJanitor()`
+  - 新增 IPC `scripts:activeRuns` 和 `scripts:activeByProfile`
+  - `scripts:run` 处理器：catch 到 `ProfileBusyError` 时回 `{ ok:false, error: { code:'PROFILE_BUSY', message, occupiedBy } }`
+- `electron/preload.ts` + `src/vite-env.d.ts`：扩 `scripts.run` 错误类型；新增 `scripts.activeRuns()` / `scripts.activeByProfile()`
+- `src/components/ActiveRunsButton.tsx`（新）：Header 抽屉 + 1s 心跳实时秒数 + Stop / Open script
+- `src/App.tsx`：`activeRuns` state + 启动拉一次 + 订阅 `'active-changed'`；Header 注入 `ActiveRunsButton`；`ProfilesPanel` 注入 `scriptingByProfileId` 和 SCRIPTING 徽章
+- `src/components/ScriptsView.tsx`：`activeRuns` 透传
+- `src/components/ScriptRunPanel.tsx`：
+  - liveRuns 跨脚本切换保留（按 `scriptId` 过滤显示）
+  - PROFILE_BUSY 失败时本地化文案带占用脚本名
+  - `ProfileSelector` chip 灰显 + tooltip 显示占用脚本名
+  - 内嵌的 RunRow 用 `<div role="button">` 替代 `<button>`，避免 React 警告"`<button>` 不能嵌套 `<button>`"
 
 换机操作：
 
@@ -206,7 +241,8 @@ import { z } from 'zod'
 | 2 | Monaco Editor + 类型补全 + hover + 包名补全 | ✅ 已 push（`af18c56` 修复合并） |
 | 3 | 运行面板：多选 profile、并发 run、实时日志流、stop/stopAll | ✅ 代码已 push（`b2b46d6`），**未手测** |
 | 平台/startUrl 重构 | 删 `BrowserProfile.platform`，startUrl 改"仅首次启动" | ✅ 代码已 push（`b2b46d6`），**未手测** |
-| 4 | 可拖动分隔条、运行中时长每秒刷新、Cmd+S/Cmd+Enter 快捷键、空态去新建环境引导 | ✅ 代码已落（待 commit），**未手测** |
+| 4 | 可拖动分隔条、运行中时长每秒刷新、Cmd+S/Cmd+Enter 快捷键、空态去新建环境引导 | ✅ 代码已落，**未手测** |
+| 占用规则三步走 | profile 互斥 + Header 抽屉 + Environments 徽章 + Scripts chip 灰显 + 启动自检 | ✅ 代码已落（待 commit），**未手测** |
 
 Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
@@ -309,9 +345,50 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
 ---
 
+## 11b. **占用规则验证清单**（未跑）
+
+`pnpm run dev`，准备至少 2 个 profile 和 2 个脚本（一个 loop / 一个 smoke）。
+
+### Header 全局 Activity 按钮 + 抽屉
+1. 应用启动时 Header 右侧 Activity 图标按钮**无徽章**（活跃 run = 0）
+2. 在脚本面板跑一个 loop → 几秒内 Header 按钮右上角出现红色 `1` 数字徽章
+3. 点 Activity 按钮 → 弹出右上抽屉，标题 `Active runs · 1`，列出一行：
+   - 左：amber `RUNNING` 徽章 + 脚本名 + `<profile name> · X 秒`
+   - 右：`Open script`（外链图标）+ `Stop`（红色）
+4. 抽屉里"已运行 X 秒"应该每秒 +1
+5. 同时再跑一个第二个 profile 的 smoke → 抽屉数字变 `2`
+6. 点其中一行的 `Open script` → 抽屉关闭，自动切到 Scripts 视图并选中那个脚本
+7. 点 `Stop` → 那一行 1-2 秒内消失，徽章数字 -1
+8. 全部停掉后 → 徽章消失；抽屉打开显示"当前没有脚本在跑。"
+9. 抽屉外点击 / 按 Esc → 抽屉关闭
+
+### Environments 列表 SCRIPTING 徽章
+10. 在 Scripts 面板跑一个 profile 的脚本 → 切回 Environments tab，对应行 Status 列从 `ONLINE`/`OFFLINE` 变成 amber `SCRIPTING` 徽章（带跳动小点）
+11. 点 SCRIPTING 徽章 → 自动切到 Scripts 视图并选中跑这个 profile 的脚本
+12. 停掉脚本 → Status 列回到 `ONLINE`（如浏览器还在跑）/ `OFFLINE`（如浏览器已退）
+
+### Scripts 面板 ProfileSelector chip 占用提示
+13. 脚本 A 在 profile X 上跑 → 切到脚本 B 的面板，profile X 的 chip 灰显（amber 边框 + 半透明），不可勾选
+14. hover 灰显 chip → Tooltip 显示"该环境正在运行脚本「A」..."
+15. 同一脚本 A 的面板下，profile X 的 chip 不灰但带跳动小 amber 点（"自己在跑"）
+16. 试图绕过 UI 直接对已占用 profile 调 `scripts.run` → 主进程返回 `PROFILE_BUSY`，渲染端弹出 amber 错误行展示占用脚本名
+
+### 启动自检（janitor）
+17. 跑一个 loop → kill 主进程（`pkill -9 Electron`，模拟崩溃）→ 用 `ps aux | grep AUTO_REGISTRY_SCRIPT_CONTEXT` 确认有孤儿子进程留着
+18. `pnpm run dev` 重启 → 启动日志（main 进程 console）应该有 `[janitor] killed orphan scripts ...` 之类输出
+19. 重启后 `ps aux | grep AUTO_REGISTRY_SCRIPT_CONTEXT` 应该没有遗留
+20. 同样场景：上一轮 SIGKILL 后某个 profile 的 user-data 目录里残留 `Singleton*` 文件 → 重启后这些文件应该被清掉，下次 GUI Run 不再卡住
+
+### 兜底拉取
+21. App 启动后立刻看 Header → 即便错过了第一轮 `'active-changed'` 事件，初始拉取 `scripts:activeRuns` 也应该让徽章显示正确（启动时无活跃 run 应显示 0；如果是 dev hot-reload 时已有 run 在跑应显示对应数字）
+
+如果哪一项不对，**先修再下一步**。
+
+---
+
 ## 12. Phase 3 收尾后的下一步
 
-`§11` 全绿后 Phase 3 Done。后续候选（按优先级，等用户拍板）：
+`§11` + `§11b` 全绿后 Phase 3 Done。后续候选（按优先级，等用户拍板）：
 
 - **Phase 4 Dev Server**：本地 HTTP/WebSocket 让外部 VSCode 项目通过 `auto-registry-sdk-client` 包反向调用应用 SDK
 - **Phase 5 模板市场**：预设 3-5 个常用脚本（Amazon 登录、采集、批量操作）
@@ -354,8 +431,9 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 1. **换机后**：拉代码 → `pnpm install` → `pnpm run build` 确认绿 → `pnpm run dev` 启动
 2. **跑 §10c 验证清单**（21 项，Step 3 + 重构）
 3. **跑 §11 验证清单**（14 项，Step 4 润色）
-4. 哪一项不对：贴给 agent，先修再下一步
-5. 全绿：Phase 3 Done，告诉 agent 进 §12 的下一步候选
+4. **跑 §11b 验证清单**（21 项，占用规则三步走）
+5. 哪一项不对：贴给 agent，先修再下一步
+6. 全绿：Phase 3 Done，告诉 agent 进 §12 的下一步候选
 
 ---
 

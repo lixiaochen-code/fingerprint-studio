@@ -26,6 +26,9 @@ type Translations = {
   status_failed: string
   status_stopped: string
   startFailed: string
+  /** profile 已被另一个 run 占用时的提示；用 {{script}} 替换占用脚本的 id（如有） */
+  profileBusy: string
+  profileBusyUnknown: string
   durationSec: string
   clear: string
   filterAll: string
@@ -49,6 +52,8 @@ const labels: Record<Locale, Translations> = {
     status_failed: 'FAILED',
     status_stopped: 'STOPPED',
     startFailed: 'Failed to start: {{message}}',
+    profileBusy: 'This environment is already running script "{{script}}". Stop it first or pick another environment.',
+    profileBusyUnknown: 'This environment is already running another script. Stop it first or pick another environment.',
     durationSec: '{{seconds}}s',
     clear: 'Clear finished',
     filterAll: 'All'
@@ -70,6 +75,8 @@ const labels: Record<Locale, Translations> = {
     status_failed: '失败',
     status_stopped: '已停止',
     startFailed: '启动失败：{{message}}',
+    profileBusy: '该环境正在运行脚本「{{script}}」，请先停止它或换一个环境。',
+    profileBusyUnknown: '该环境正在运行另一个脚本，请先停止它或换一个环境。',
     durationSec: '{{seconds}} 秒',
     clear: '清理已结束',
     filterAll: '全部'
@@ -123,8 +130,17 @@ function logTone(level: LogEntry['level']): string {
 
 export type ScriptRunPanelProps = {
   script: Script
+  /** 全部脚本，用来在 PROFILE_BUSY 错误里把占用的 scriptId 换成可读名字 */
+  scripts: Script[]
   profiles: BrowserProfile[]
   runningProfileIds: Set<string>
+  /**
+   * 全局活跃 run 列表。用来：
+   * - 不属于当前脚本的占用 → 该 profile chip 灰显 + tooltip 提示占用脚本
+   * - 属于当前脚本的占用 → chip 高亮（"已经在跑你这个脚本"）
+   * 不传也工作（就是没有占用提示），保持向后兼容
+   */
+  activeRuns?: ScriptRun[]
   locale: Locale
   /** 空态时点击"去新建环境"的回调；未提供则按钮不显示 */
   onGoToEnvironments?: () => void
@@ -140,21 +156,31 @@ export type ScriptRunPanelProps = {
  * - profile 多选：复用现有 BrowserProfile 列表；勾上的并发 run
  * - "Stop all" 仅停本面板范围内的 run（不调 stopAll IPC，那是全局清理）
  */
-export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, onGoToEnvironments }: ScriptRunPanelProps) {
+export function ScriptRunPanel({ script, scripts, profiles, runningProfileIds, activeRuns, locale, onGoToEnvironments }: ScriptRunPanelProps) {
   const t = labels[locale]
+  // selectedProfileIds 是"为当前脚本准备的下次 Run 选区"，每个脚本独立 —— 切脚本时复位。
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set())
+  // liveRuns 跨脚本保留：用户切回原脚本仍能看见自己 run 的状态/日志。
+  // 显示时按 script.id 过滤；count、stopAll、clearFinished 也都基于当前脚本可见的子集。
   const [liveRuns, setLiveRuns] = useState<LiveRun[]>([])
   const [busy, setBusy] = useState(false)
 
-  // 切换脚本时复位
+  // 切脚本只复位 profile 选区；liveRuns 保留
   useEffect(() => {
-    setLiveRuns([])
     setSelectedProfileIds(new Set())
   }, [script.id])
+
+  // 当前脚本可见的 run 子集（衍生值，作用于本面板的 UI 与操作范围）
+  const visibleRuns = useMemo(
+    () => liveRuns.filter((entry) => entry.run.scriptId === script.id),
+    [liveRuns, script.id]
+  )
 
   // 订阅 runtime 事件并按 scriptId / runId 路由
   useEffect(() => {
     const unsubscribe = window.registry.scripts.onEvent((event: ScriptRuntimeEvent) => {
+      // 'active-changed' 是占用变化广播，没有 runId，本面板不消费它（由 App 顶层订阅一次）
+      if (event.type === 'active-changed') return
       setLiveRuns((prev) => {
         const idx = prev.findIndex((entry) => entry.run.id === event.runId)
         if (idx === -1) return prev // 我们没追踪过这个 run（可能是另一个脚本的）
@@ -194,6 +220,21 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
     return map
   }, [profiles])
 
+  // 查名字用：PROFILE_BUSY 错误里只带 scriptId，转成"脚本名"显示更友好
+  const scriptNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of scripts) map.set(s.id, s.name)
+    return map
+  }, [scripts])
+
+  // 哪些 profile 已被某个 run 占用：Map<profileId, ScriptRun>
+  // ProfileSelector 用来 chip 灰显 + tooltip 提示。
+  const occupyByProfileId = useMemo(() => {
+    const map = new Map<string, ScriptRun>()
+    if (activeRuns) for (const run of activeRuns) map.set(run.profileId, run)
+    return map
+  }, [activeRuns])
+
   const toggleProfile = useCallback((id: string, checked: boolean) => {
     setSelectedProfileIds((prev) => {
       const next = new Set(prev)
@@ -223,9 +264,20 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
               profileLabel: profile?.name ?? profileId
             })
           } else {
-            // 启动失败也产出一条占位 run，让用户看到失败原因
+            // 启动失败也产出一条占位 run，让用户看到失败原因。
+            // PROFILE_BUSY 单独走更友好的本地化文案（带占用脚本名）。
             const profile = profileById.get(profileId)
             const fakeId = `failed_${Date.now().toString(36)}_${profileId}`
+            const isBusy = result.error.code === 'PROFILE_BUSY'
+            const busyScriptName = isBusy && result.error.occupiedBy
+              ? scriptNameById.get(result.error.occupiedBy.scriptId)
+              : undefined
+            const friendlyMessage = isBusy
+              ? (busyScriptName
+                  ? interpolate(t.profileBusy, { script: busyScriptName })
+                  : t.profileBusyUnknown)
+              : interpolate(t.startFailed, { message: result.error.message })
+
             next.push({
               run: {
                 id: fakeId,
@@ -234,12 +286,12 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
                 status: 'failed',
                 startedAt: new Date().toISOString(),
                 endedAt: new Date().toISOString(),
-                error: result.error.message,
+                error: friendlyMessage,
                 logPath: ''
               },
               logs: [{
                 level: 'error',
-                line: interpolate(t.startFailed, { message: result.error.message }),
+                line: friendlyMessage,
                 at: new Date().toISOString()
               }],
               profileLabel: profile?.name ?? profileId
@@ -251,7 +303,7 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
     } finally {
       setBusy(false)
     }
-  }, [script.id, selectedProfileIds, profileById, t])
+  }, [script.id, selectedProfileIds, profileById, scriptNameById, t])
 
   // ref 跟踪 runSelected 最新版，让全局 keydown 监听器读到最新闭包
   const runSelectedRef = useRef(runSelected)
@@ -277,16 +329,21 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
   }, [])
 
   const stopAllInPanel = useCallback(async () => {
-    const active = liveRuns.filter((entry) => !isFinished(entry.run.status))
+    // 只停"当前脚本"的活跃 run。其它脚本的 run 由全局抽屉负责（Step 3 实装），
+    // 这里不动它们 —— 用户切到另一脚本面板还能看到自己的 run。
+    const active = visibleRuns.filter((entry) => !isFinished(entry.run.status))
     await Promise.all(active.map((entry) => window.registry.scripts.stop(entry.run.id)))
-  }, [liveRuns])
+  }, [visibleRuns])
 
   const clearFinished = useCallback(() => {
-    setLiveRuns((prev) => prev.filter((entry) => !isFinished(entry.run.status)))
-  }, [])
+    // 只清当前脚本已结束的 run；其它脚本的列表不动
+    setLiveRuns((prev) => prev.filter((entry) =>
+      entry.run.scriptId !== script.id || !isFinished(entry.run.status)
+    ))
+  }, [script.id])
 
-  const hasActive = liveRuns.some((entry) => !isFinished(entry.run.status))
-  const hasFinished = liveRuns.some((entry) => isFinished(entry.run.status))
+  const hasActive = visibleRuns.some((entry) => !isFinished(entry.run.status))
+  const hasFinished = visibleRuns.some((entry) => isFinished(entry.run.status))
 
   return (
     <div className="flex h-full flex-col border-t border-border bg-background">
@@ -294,7 +351,7 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
         <div className="flex items-center gap-3">
           <h3 className="font-display text-[11px] font-bold uppercase tracking-wider">{t.panelTitle}</h3>
           <span className="font-mono text-[10px] text-muted-foreground">
-            {liveRuns.length > 0 ? `${liveRuns.filter((r) => !isFinished(r.run.status)).length} / ${liveRuns.length}` : ''}
+            {visibleRuns.length > 0 ? `${visibleRuns.filter((r) => !isFinished(r.run.status)).length} / ${visibleRuns.length}` : ''}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -322,16 +379,19 @@ export function ScriptRunPanel({ script, profiles, runningProfileIds, locale, on
         busy={busy}
         t={t}
         onGoToEnvironments={onGoToEnvironments}
+        currentScriptId={script.id}
+        occupyByProfileId={occupyByProfileId}
+        scriptNameById={scriptNameById}
       />
 
       <div className="flex-1 overflow-hidden">
-        {liveRuns.length === 0 ? (
+        {visibleRuns.length === 0 ? (
           <div className="flex h-full items-center justify-center px-4 text-center">
             <p className="text-[11px] text-muted-foreground">{t.emptyRuns}</p>
           </div>
         ) : (
           <ul className="flex h-full flex-col divide-y divide-border overflow-y-auto">
-            {liveRuns.map((entry) => (
+            {visibleRuns.map((entry) => (
               <RunRow key={entry.run.id} entry={entry} t={t} onStop={() => void stopRun(entry.run.id)} />
             ))}
           </ul>
@@ -349,7 +409,10 @@ function ProfileSelector({
   onRun,
   busy,
   t,
-  onGoToEnvironments
+  onGoToEnvironments,
+  currentScriptId,
+  occupyByProfileId,
+  scriptNameById
 }: {
   profiles: BrowserProfile[]
   runningProfileIds: Set<string>
@@ -359,6 +422,9 @@ function ProfileSelector({
   busy: boolean
   t: Translations
   onGoToEnvironments?: () => void
+  currentScriptId: string
+  occupyByProfileId: Map<string, ScriptRun>
+  scriptNameById: Map<string, string>
 }) {
   if (profiles.length === 0) {
     return (
@@ -383,28 +449,51 @@ function ProfileSelector({
         {profiles.map((profile) => {
           const isChecked = selected.has(profile.id)
           const isRunning = runningProfileIds.has(profile.id)
-          return (
-            <Tooltip
-              key={profile.id}
-              side="top"
-              content={
-                <div className="space-y-0.5">
-                  <div className="font-bold">{profile.name}</div>
-                  <div className="font-mono text-[10px] text-muted-foreground">{profile.proxy.host}:{profile.proxy.port}</div>
+          // 占用判定：另一个脚本（不是当前脚本）的 run 占了这个 profile，禁止勾选。
+          // 当前脚本自己的 run 在跑也算占用——再勾它点 Run 主进程也会拒，但 UI 提前拦更友好。
+          const occupy = occupyByProfileId.get(profile.id)
+          const occupiedByOther = occupy && occupy.scriptId !== currentScriptId
+          const occupiedBySelf = occupy && occupy.scriptId === currentScriptId
+          const isDisabled = Boolean(occupy)
+          const occupyingScriptName = occupy ? scriptNameById.get(occupy.scriptId) : undefined
+          const tooltipContent = (
+            <div className="space-y-0.5">
+              <div className="font-bold">{profile.name}</div>
+              <div className="font-mono text-[10px] text-muted-foreground">{profile.proxy.host}:{profile.proxy.port}</div>
+              {occupiedByOther && (
+                <div className="font-mono text-[10px] text-amber-400">
+                  {interpolate(t.profileBusy, { script: occupyingScriptName ?? '?' })}
                 </div>
-              }
-            >
+              )}
+              {occupiedBySelf && (
+                <div className="font-mono text-[10px] text-amber-400">{t.status_running}</div>
+              )}
+            </div>
+          )
+          return (
+            <Tooltip key={profile.id} side="top" content={tooltipContent}>
               <label
-                className={`flex cursor-pointer items-center gap-2 border px-2 py-1 transition-colors ${isChecked ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background hover:bg-muted/30'}`}
+                className={[
+                  'flex items-center gap-2 border px-2 py-1 transition-colors',
+                  isDisabled
+                    ? 'cursor-not-allowed border-amber-400/30 bg-amber-400/5 text-amber-400 opacity-70'
+                    : isChecked
+                      ? 'cursor-pointer border-primary bg-primary/10 text-primary'
+                      : 'cursor-pointer border-border bg-background hover:bg-muted/30'
+                ].join(' ')}
               >
                 <Checkbox
                   checked={isChecked}
                   onChange={(value) => onToggle(profile.id, value)}
                   ariaLabel={profile.name}
+                  disabled={isDisabled}
                 />
                 <span className="text-[11px]">{profile.name}</span>
-                {isRunning && (
+                {isRunning && !occupy && (
                   <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-label="online" />
+                )}
+                {occupy && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" aria-label="scripting" />
                 )}
               </label>
             </Tooltip>
@@ -474,10 +563,22 @@ function RunRow({ entry, t, onStop }: { entry: LiveRun; t: Translations; onStop:
 
   return (
     <li className="flex flex-col">
-      <button
-        type="button"
-        className="flex items-center justify-between gap-3 bg-secondary/20 px-4 py-2 text-left hover:bg-secondary/40"
+      {/*
+        这里**不**用 <button>：里面要嵌一个 Stop <button>，HTML 不允许 button 嵌套
+        （会触发 hydration error 警告）。改用 div + role/tabIndex 维持键盘可达性。
+      */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        className="flex cursor-pointer items-center justify-between gap-3 bg-secondary/20 px-4 py-2 text-left hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         onClick={() => setExpanded((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            setExpanded((value) => !value)
+          }
+        }}
       >
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -488,15 +589,24 @@ function RunRow({ entry, t, onStop }: { entry: LiveRun; t: Translations; onStop:
           <span className="truncate text-xs font-bold tracking-tight">{entry.profileLabel}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{duration}</span>
         </div>
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
           {!finished && (
-            <Button size="sm" variant="destructive" className="h-6 px-2 text-[10px]" onClick={onStop}>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-6 px-2 text-[10px]"
+              onClick={(event) => {
+                // 阻止冒泡到外层 div 否则点 Stop 会顺带把这一行折叠
+                event.stopPropagation()
+                onStop()
+              }}
+            >
               <Square className="mr-1 h-3 w-3 fill-current" />
               {t.stop}
             </Button>
           )}
         </div>
-      </button>
+      </div>
       {expanded && (
         <div
           ref={logRef}

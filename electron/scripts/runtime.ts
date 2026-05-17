@@ -25,9 +25,20 @@ export interface ScriptStatusEvent {
   endedAt?: string
 }
 
+/**
+ * 活跃 run 集合发生变化（启动 / 退出）时的快照事件。
+ * 渲染层订阅它以驱动 profile 占用 UI（Environments 列表 SCRIPTING 徽章、Scripts 面板
+ * profile chip 灰显、Header 抽屉计数）。比每个事件都自己 listActive() 简单得多。
+ */
+export interface ScriptActiveChangedEvent {
+  /** 当前所有活跃 run 的快照 */
+  active: ScriptRun[]
+}
+
 export type ScriptRuntimeEvent =
   | ({ type: 'log' } & ScriptLogEvent)
   | ({ type: 'status' } & ScriptStatusEvent)
+  | ({ type: 'active-changed' } & ScriptActiveChangedEvent)
 
 type ActiveRun = {
   run: ScriptRun
@@ -41,6 +52,32 @@ type ActiveRun = {
 }
 
 const GRACEFUL_SHUTDOWN_MS = 3000
+
+/**
+ * 在 start() 时若目标 profile 已有活跃 run，会抛出这个错误。
+ * 主进程 IPC handler 把它序列化成 `{ code: 'PROFILE_BUSY', occupiedBy: { runId, scriptId } }`
+ * 给渲染层弹 toast。
+ *
+ * 设计目的："一个 profile 同一时刻最多 1 个活跃 ScriptRun" 是产品规则的硬约束，
+ * runtime 这层就是真值——绝对不让两个 run 同时持有同一个 profile 的 puppeteer 连接，
+ * 否则它们会抢 page、互相覆盖 cookie 状态，逻辑闭环就破了。
+ */
+export class ProfileBusyError extends Error {
+  readonly code = 'PROFILE_BUSY'
+  constructor(readonly profileId: string, readonly occupiedBy: { runId: string; scriptId: string }) {
+    super(`Profile ${profileId} is already running script ${occupiedBy.scriptId} (run ${occupiedBy.runId})`)
+    this.name = 'ProfileBusyError'
+  }
+
+  toJSON() {
+    return {
+      code: this.code,
+      profileId: this.profileId,
+      occupiedBy: this.occupiedBy,
+      message: this.message
+    }
+  }
+}
 
 /**
  * 父进程侧的脚本执行管理器。负责：
@@ -66,6 +103,17 @@ export class ScriptRuntimeManager extends EventEmitter {
     return Array.from(this.active.values()).map((entry) => entry.run)
   }
 
+  /**
+   * 查给定 profile 当前是否被某个 ScriptRun 占用。
+   * 渲染层用它来决定 profile chip 是否灰掉、Environments 列表是否显示 SCRIPTING 徽章。
+   */
+  getActiveByProfile(profileId: string): ScriptRun | undefined {
+    for (const entry of this.active.values()) {
+      if (entry.run.profileId === profileId) return entry.run
+    }
+    return undefined
+  }
+
   isRunning(runId: string): boolean {
     return this.active.has(runId)
   }
@@ -76,6 +124,17 @@ export class ScriptRuntimeManager extends EventEmitter {
     webSocketDebuggerUrl: string
   }): Promise<ScriptRun> {
     const { script, profile, webSocketDebuggerUrl } = options
+
+    // 互斥规则：一个 profile 同一时刻只允许 1 个活跃 ScriptRun。
+    // 提前在这里拦下，runtime 永远不会进入"两个 run 同时持有同一 profile"的状态。
+    const occupiedBy = this.getActiveByProfile(profile.id)
+    if (occupiedBy) {
+      throw new ProfileBusyError(profile.id, {
+        runId: occupiedBy.id,
+        scriptId: occupiedBy.scriptId
+      })
+    }
+
     const run = this.store.createRun(script.id, profile.id)
 
     // 工作目录：local 脚本用自身目录；external 脚本用 <scriptsRoot>/external-states/<scriptId>
@@ -117,6 +176,7 @@ export class ScriptRuntimeManager extends EventEmitter {
     this.active.set(run.id, entry)
 
     this.emitStatus(run.id, 'running')
+    this.emitActiveChanged()
 
     // stdout/stderr（用户自己 console.log 的内容也会走这里）
     child.stdout?.on('data', (chunk: Buffer) => this.handleStream(run.id, 'stdout', chunk))
@@ -227,11 +287,18 @@ export class ScriptRuntimeManager extends EventEmitter {
       error: finalized.error,
       endedAt: finalized.endedAt
     })
+    // 占用释放后通知 UI 刷新（profile chip 颜色 / Environments 列表 SCRIPTING 徽章 / Header 抽屉计数）
+    this.emitActiveChanged()
   }
 
   private emitStatus(runId: string, status: ScriptRunStatus, extras: Partial<ScriptStatusEvent> = {}): void {
     const event: ScriptStatusEvent = { runId, status, ...extras }
     this.emit('event', { type: 'status', ...event } satisfies ScriptRuntimeEvent)
+  }
+
+  private emitActiveChanged(): void {
+    const active = this.listActive()
+    this.emit('event', { type: 'active-changed', active } satisfies ScriptRuntimeEvent)
   }
 }
 

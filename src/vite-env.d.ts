@@ -4,7 +4,16 @@ import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfi
 import type { ScriptRuntimeEvent } from '../electron/scripts/runtime'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
-type ScriptRunResult = { ok: true; run: ScriptRun } | { ok: false; error: { message: string } }
+type ScriptRunResult =
+  | { ok: true; run: ScriptRun }
+  | {
+      ok: false
+      error: {
+        message: string
+        code?: string
+        occupiedBy?: { runId: string; scriptId: string }
+      }
+    }
 
 declare global {
   interface Window {
@@ -39,6 +48,7 @@ declare global {
         list: () => Promise<Script[]>
         listRuns: () => Promise<ScriptRun[]>
         activeRuns: () => Promise<ScriptRun[]>
+        activeByProfile: (profileId: string) => Promise<ScriptRun | undefined>
         save: (draft: ScriptDraft) => Promise<Script>
         remove: (id: string) => Promise<void>
         readSource: (id: string) => Promise<string>

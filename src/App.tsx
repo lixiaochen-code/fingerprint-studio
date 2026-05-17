@@ -30,15 +30,18 @@ import {
   Sun,
   Moon,
   Monitor,
-  FileCode2
+  FileCode2,
+  Layers
 } from 'lucide-react'
-import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, TargetOs } from '../electron/types'
+import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOs } from '../electron/types'
 import { KernelSetup } from './components/KernelSetup'
 import { ProfileFormDialog } from './components/ProfileFormDialog'
 import { ProfileDetailsDialog } from './components/ProfileDetailsDialog'
 import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog'
 import { SettingsView } from './components/SettingsView'
 import { ScriptsView } from './components/ScriptsView'
+import { KeepAlive } from './components/KeepAlive'
+import { ActiveRunsButton } from './components/ActiveRunsButton'
 import { interpolate } from './lib/i18n'
 import './styles.css'
 
@@ -323,6 +326,10 @@ export function App() {
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => resolveTheme(initialTheme()))
   const [scripts, setScripts] = useState<Script[]>([])
   const [selectedScriptId, setSelectedScriptId] = useState<string>()
+  // 全局活跃 run 集合（来自主进程 'active-changed' 广播 + 启动时的 listActive 兜底）。
+  // Header 抽屉 / Environments 列表 SCRIPTING 徽章 / Scripts 面板 chip 灰显都从这里派生。
+  // 注意：这里**不**保存日志，日志由 ScriptRunPanel 自己分脚本维护。
+  const [activeRuns, setActiveRuns] = useState<ScriptRun[]>([])
   const t = translations[locale]
 
   useEffect(() => {
@@ -392,6 +399,24 @@ export function App() {
     })
     return () => unsubscribe()
   }, [profiles, t])
+
+  // 订阅活跃 run 集合：主进程在 start / handleExit 时广播 'active-changed'。
+  // 启动时主动拉一次兜底（错过初始事件不会有空状态错觉）。
+  useEffect(() => {
+    let cancelled = false
+    void window.registry.scripts.activeRuns().then((initial) => {
+      if (!cancelled) setActiveRuns(initial)
+    })
+    const unsubscribe = window.registry.scripts.onEvent((event) => {
+      if (event.type === 'active-changed') {
+        setActiveRuns(event.active)
+      }
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
@@ -552,90 +577,6 @@ export function App() {
     }
   }
 
-  if (view === 'scripts') {
-    return (
-      <div className="flex h-screen flex-col bg-background text-foreground font-sans">
-        <Header
-          t={t}
-          locale={locale}
-          profilesCount={profiles.length}
-          pluginsCount={plugins.length}
-          runningCount={runningIds.size}
-          runtime={runtimeInfo}
-          themePref={themePref}
-          onThemeChange={setThemePref}
-          onAdd={() => setFormDialog({ open: true, mode: 'create' })}
-          onSettings={() => setView('settings')}
-          onScripts={() => setView('scripts')}
-          onHome={() => setView('profiles')}
-          onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
-          currentView="scripts"
-        />
-        <div className="flex-1 overflow-hidden">
-          <ScriptsView
-            locale={locale}
-            theme={resolvedTheme}
-            scripts={scripts}
-            profiles={profiles}
-            runningProfileIds={runningIds}
-            selectedScriptId={selectedScriptId}
-            onSelect={setSelectedScriptId}
-            onCreate={createScript}
-            onRemove={removeScript}
-            onGoToEnvironments={() => setView('profiles')}
-          />
-        </div>
-        <Toaster theme={resolvedTheme} position="top-right" richColors closeButton />
-      </div>
-    )
-  }
-
-  if (view === 'settings') {
-    return (
-      <div className="flex h-screen flex-col bg-background text-foreground font-sans">
-        <Header
-          t={t}
-          locale={locale}
-          profilesCount={profiles.length}
-          pluginsCount={plugins.length}
-          runningCount={runningIds.size}
-          runtime={runtimeInfo}
-          themePref={themePref}
-          onThemeChange={setThemePref}
-          onAdd={() => setFormDialog({ open: true, mode: 'create' })}
-          onSettings={() => setView('settings')}
-          onScripts={() => setView('scripts')}
-          onHome={() => setView('profiles')}
-          onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
-          currentView="settings"
-        />
-        <div className="flex-1 overflow-auto">
-          <SettingsView
-            runtimeInfo={runtimeInfo}
-            plugins={plugins}
-            locale={locale}
-            onBack={() => setView('profiles')}
-            onInstallKernel={(kernel) => setSetupKernel(kernel)}
-            onImportPlugin={() => importPluginFromForm().then(() => undefined).catch(() => undefined)}
-            onSetActiveVersion={setActiveVersion}
-            onDeletePlugin={deletePlugin}
-          />
-        </div>
-        <KernelSetup
-          open={setupKernel !== undefined}
-          kernel={setupKernel || 'chromium'}
-          status={setupKernel && runtimeInfo ? runtimeInfo.kernels[setupKernel] : undefined}
-          locale={locale}
-          hostSupportsItbrowser={runtimeInfo?.itbrowserSupported || false}
-          hostSupportsCloak={runtimeInfo?.cloakSupported || false}
-          onClose={() => setSetupKernel(undefined)}
-          onInstalled={() => void load()}
-        />
-        <Toaster theme={resolvedTheme} position="top-right" richColors closeButton />
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-screen flex-col bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
       <Header
@@ -647,190 +588,86 @@ export function App() {
         runtime={runtimeInfo}
         themePref={themePref}
         onThemeChange={setThemePref}
-        onAdd={() => setFormDialog({ open: true, mode: 'create' })}
-        onSettings={() => setView('settings')}
-        onScripts={() => setView('scripts')}
-        onHome={() => setView('profiles')}
+        onNavigate={setView}
         onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
-        currentView="profiles"
+        currentView={view}
+        activeRuns={activeRuns}
+        scripts={scripts}
+        profiles={profiles}
+        onOpenScript={(scriptId) => {
+          setSelectedScriptId(scriptId)
+          setView('scripts')
+        }}
       />
 
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden p-6 gap-4">
-          <div className="flex items-center gap-3">
-            <FingerprintBadge runtime={runtimeInfo} t={t} />
-            <div className="relative max-w-md flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t.searchPlaceholder}
-                className="pl-10 h-10 border-none bg-muted/50 focus-visible:ring-1"
-              />
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => void load()}>
-              <RotateCcw className="h-4 w-4 mr-2" />
-              {t.refresh}
-            </Button>
-          </div>
+      {/*
+        三视图保活路由：每个 view 渲染一次后就保留在 React 树里，切走只是 display:none，
+        所有内部状态 / Monaco 实例 / 滚动位置 / 订阅都保留。
+        Environments 默认就 mount（用户进来第一眼就需要）；Scripts/Settings 走 lazy，
+        第一次切到才挂载，避免 Monaco chunk 在用户没看脚本前就被请求。
+      */}
+      <KeepAlive visible={view === 'profiles'} lazy={false}>
+        <ProfilesPanel
+          t={t}
+          locale={locale}
+          runtimeInfo={runtimeInfo}
+          query={query}
+          onQueryChange={setQuery}
+          onReload={() => void load()}
+          filtered={filtered}
+          runningIds={runningIds}
+          busyId={busyId}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
+          onToggleAll={toggleAll}
+          allFilteredSelected={allFilteredSelected}
+          someFilteredSelected={someFilteredSelected}
+          onClearSelection={() => setSelectedIds(new Set())}
+          onShowDetails={(ids) => setDetailsIds(ids)}
+          onAskDelete={(ids) => setDeleteIds(ids)}
+          onAdd={() => setFormDialog({ open: true, mode: 'create' })}
+          onEdit={(profile) => setFormDialog({ open: true, mode: 'edit', profile })}
+          onDuplicate={duplicateProfile}
+          onLaunch={launch}
+          onStop={stop}
+          activeRuns={activeRuns}
+          scripts={scripts}
+          onOpenScript={(scriptId) => {
+            setSelectedScriptId(scriptId)
+            setView('scripts')
+          }}
+        />
+      </KeepAlive>
 
-          <div className={`flex items-center justify-between border px-4 py-2 transition-colors ${selectedIds.size > 0 ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'}`}>
-            <div className="flex items-center gap-3 text-xs">
-              <Checkbox
-                checked={selectedIds.size > 0}
-                onChange={() => setSelectedIds(new Set())}
-                disabled={selectedIds.size === 0}
-              />
-              <span className={`font-display font-bold uppercase tracking-wider ${selectedIds.size > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
-                {interpolate(t.selected, { count: String(selectedIds.size) })}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                disabled={selectedIds.size === 0}
-                onClick={() => setDetailsIds(Array.from(selectedIds))}
-              >
-                <Eye className="h-3 w-3" />
-                {t.details}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                className="gap-2"
-                disabled={selectedIds.size === 0}
-                onClick={() => setDeleteIds(Array.from(selectedIds))}
-              >
-                <Trash2 className="h-3 w-3" />
-                {t.delete}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={selectedIds.size === 0}
-                onClick={() => setSelectedIds(new Set())}
-              >
-                <X className="h-3 w-3 mr-1" />
-                {t.clear}
-              </Button>
-            </div>
-          </div>
+      <KeepAlive visible={view === 'scripts'}>
+        <ScriptsView
+          locale={locale}
+          theme={resolvedTheme}
+          scripts={scripts}
+          profiles={profiles}
+          runningProfileIds={runningIds}
+          activeRuns={activeRuns}
+          selectedScriptId={selectedScriptId}
+          onSelect={setSelectedScriptId}
+          onCreate={createScript}
+          onRemove={removeScript}
+          onGoToEnvironments={() => setView('profiles')}
+        />
+      </KeepAlive>
 
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border border-border bg-secondary">
-            <div className="flex-1 overflow-auto">
-              <table className="w-full caption-bottom text-sm">
-                <thead className="sticky top-0 z-10 border-b border-border bg-secondary">
-                  <tr className="border-b border-border">
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[40px]">
-                      <Checkbox
-                        checked={allFilteredSelected ? true : someFilteredSelected ? 'indeterminate' : false}
-                        onChange={(checked) => toggleAll(checked)}
-                      />
-                    </th>
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{t.environment}</th>
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[180px]">{t.proxy}</th>
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[260px]">{t.fingerprint}</th>
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[140px]">{t.createdAt}</th>
-                    <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[100px]">{t.status}</th>
-                    <th className="h-10 px-4 text-right align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[160px]">{t.actions}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((profile) => {
-                    const isRunning = runningIds.has(profile.id)
-                    const isBusy = busyId === profile.id
-                    const target = profile.fingerprint.targetOs as TargetOs
-                    const checked = selectedIds.has(profile.id)
-
-                    return (
-                      <tr key={profile.id} className="group border-b border-border transition-colors hover:bg-muted/30">
-                        <td className="p-4 align-middle">
-                          <Checkbox checked={checked} onChange={(value) => toggleSelect(profile.id, value)} />
-                        </td>
-                        <td className="p-4 align-middle">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-sm tracking-tight">{profile.name}</span>
-                            <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[200px]">
-                              {profile.notes || profile.startUrl || '—'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="p-4 align-middle">
-                          <code className="text-[11px] text-accent font-mono">
-                            {profile.proxy.host}:{profile.proxy.port}
-                          </code>
-                        </td>
-                        <td className="p-4 align-middle">
-                          <div className="flex flex-col text-[11px] font-mono text-muted-foreground gap-1">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex items-center px-1.5 py-0.5 bg-primary/15 text-primary text-[10px] font-bold tracking-wider">
-                                {targetOsLabel(target, locale)}
-                              </span>
-                              <span>{profile.fingerprint.language?.toUpperCase()} / {profile.fingerprint.timezone?.split('/').pop()}</span>
-                            </div>
-                            <span className="text-[9px] opacity-50 truncate max-w-[240px]">{profile.fingerprint.userAgent}</span>
-                          </div>
-                        </td>
-                        <td className="p-4 align-middle">
-                          <div className="flex flex-col text-[11px] font-mono text-muted-foreground">
-                            <span>{formatDate(profile.createdAt).date}</span>
-                            <span className="text-[10px] opacity-60">{formatDate(profile.createdAt).time}</span>
-                          </div>
-                        </td>
-                        <td className="p-4 align-middle">
-                          <div className="flex items-center gap-2">
-                            <div className={`h-1.5 w-1.5 rounded-full ${isRunning ? 'bg-primary animate-pulse shadow-[0_0_8px_var(--color-primary)]' : 'bg-muted'}`} />
-                            <span className={`text-[10px] font-bold font-mono tracking-widest ${isRunning ? 'text-primary' : 'text-muted-foreground'}`}>
-                              {isRunning ? t.online : t.offline}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="p-4 align-middle text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {isRunning ? (
-                              <Button variant="destructive" size="sm" className="h-8 px-3" disabled={isBusy} onClick={() => stop(profile)}>
-                                <Square className="h-3 w-3 mr-2 fill-current" />
-                                {t.stop}
-                              </Button>
-                            ) : (
-                              <Button variant="default" size="sm" className="h-8 px-3" disabled={isBusy} onClick={() => launch(profile)}>
-                                <Play className="h-3 w-3 mr-2 fill-current" />
-                                {t.run}
-                              </Button>
-                            )}
-                            <DropdownMenu
-                              trigger={
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              }
-                              items={[
-                                { label: t.details, icon: <Eye className="h-3 w-3" />, onClick: () => setDetailsIds([profile.id]) },
-                                { label: t.edit, icon: <Settings2 className="h-3 w-3" />, onClick: () => setFormDialog({ open: true, mode: 'edit', profile }) },
-                                { label: t.duplicate, icon: <Copy className="h-3 w-3" />, onClick: () => void duplicateProfile(profile) },
-                                { label: t.delete, icon: <Trash2 className="h-3 w-3" />, variant: 'destructive', onClick: () => setDeleteIds([profile.id]) }
-                              ]}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="h-32 text-center text-muted-foreground font-mono">
-                        {t.empty}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+      <KeepAlive visible={view === 'settings'}>
+        <div className="flex-1 overflow-auto">
+          <SettingsView
+            runtimeInfo={runtimeInfo}
+            plugins={plugins}
+            locale={locale}
+            onInstallKernel={(kernel) => setSetupKernel(kernel)}
+            onImportPlugin={() => importPluginFromForm().then(() => undefined).catch(() => undefined)}
+            onSetActiveVersion={setActiveVersion}
+            onDeletePlugin={deletePlugin}
+          />
         </div>
-      </main>
+      </KeepAlive>
 
       <ProfileFormDialog
         open={formDialog.open}
@@ -913,6 +750,284 @@ function FingerprintBadge({ runtime, t }: { runtime?: RuntimeInfo; t: Translatio
   )
 }
 
+/**
+ * Environments 视图主体。从 App 抽出来是为了：
+ * 1. 给 KeepAlive 提供一个干净的子树，切走时整体 display:none，搜索词/选区/滚动都保留
+ * 2. App 顶部 return 不至于太长
+ *
+ * 业务状态（profiles/runningIds/selectedIds 等）依然由 App 持有 —— 这一层只接受 props
+ * 并往下渲染。多人协作时改 App 那一层数据流，这里不用动。
+ */
+function ProfilesPanel({
+  t,
+  locale,
+  runtimeInfo,
+  query,
+  onQueryChange,
+  onReload,
+  filtered,
+  runningIds,
+  busyId,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
+  allFilteredSelected,
+  someFilteredSelected,
+  onClearSelection,
+  onShowDetails,
+  onAskDelete,
+  onAdd,
+  onEdit,
+  onDuplicate,
+  onLaunch,
+  onStop,
+  activeRuns,
+  scripts,
+  onOpenScript
+}: {
+  t: Translations
+  locale: Locale
+  runtimeInfo?: RuntimeInfo
+  query: string
+  onQueryChange: (value: string) => void
+  onReload: () => void
+  filtered: BrowserProfile[]
+  runningIds: Set<string>
+  busyId: string | undefined
+  selectedIds: Set<string>
+  onToggleSelect: (id: string, checked: boolean) => void
+  onToggleAll: (checked: boolean) => void
+  allFilteredSelected: boolean
+  someFilteredSelected: boolean
+  onClearSelection: () => void
+  onShowDetails: (ids: string[]) => void
+  onAskDelete: (ids: string[]) => void
+  onAdd: () => void
+  onEdit: (profile: BrowserProfile) => void
+  onDuplicate: (profile: BrowserProfile) => void
+  onLaunch: (profile: BrowserProfile) => void
+  onStop: (profile: BrowserProfile) => void
+  activeRuns: ScriptRun[]
+  scripts: Script[]
+  onOpenScript: (scriptId: string) => void
+}) {
+  // 把活跃 run 按 profileId 索引，用于在 Status 列显示 SCRIPTING 徽章。
+  // 闭环规则：profile 同一时刻最多 1 个活跃 run，因此 Map 直接 set 不需要合并。
+  const scriptingByProfileId = useMemo(() => {
+    const map = new Map<string, ScriptRun>()
+    for (const run of activeRuns) map.set(run.profileId, run)
+    return map
+  }, [activeRuns])
+
+  const scriptNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of scripts) map.set(s.id, s.name)
+    return map
+  }, [scripts])
+  return (
+    <main className="flex flex-1 flex-col overflow-hidden">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden p-6 gap-4">
+        <div className="flex items-center gap-3">
+          <FingerprintBadge runtime={runtimeInfo} t={t} />
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder={t.searchPlaceholder}
+              className="pl-10 h-10 border-none bg-muted/50 focus-visible:ring-1"
+            />
+          </div>
+          <Button variant="ghost" size="sm" onClick={onReload}>
+            <RotateCcw className="h-4 w-4 mr-2" />
+            {t.refresh}
+          </Button>
+        </div>
+
+        {/*
+          选区 + 操作工具条。无选中时左侧灰色 "0 selected"，右侧只显示 "+ 新建环境"；
+          有选中时左侧高亮、操作按钮（详情/删除/清除）激活。整条始终在位，避免抖动。
+        */}
+        <div className={`flex items-center justify-between border px-4 py-2 transition-colors ${selectedIds.size > 0 ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'}`}>
+          <div className="flex items-center gap-3 text-xs">
+            <Checkbox
+              checked={selectedIds.size > 0}
+              onChange={onClearSelection}
+              disabled={selectedIds.size === 0}
+            />
+            <span className={`font-display font-bold uppercase tracking-wider ${selectedIds.size > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+              {interpolate(t.selected, { count: String(selectedIds.size) })}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              disabled={selectedIds.size === 0}
+              onClick={() => onShowDetails(Array.from(selectedIds))}
+            >
+              <Eye className="h-3 w-3" />
+              {t.details}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="gap-2"
+              disabled={selectedIds.size === 0}
+              onClick={() => onAskDelete(Array.from(selectedIds))}
+            >
+              <Trash2 className="h-3 w-3" />
+              {t.delete}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={selectedIds.size === 0}
+              onClick={onClearSelection}
+            >
+              <X className="h-3 w-3 mr-1" />
+              {t.clear}
+            </Button>
+            {/* "+ 新建环境" 是 Environments 页的功能按钮（不是全局导航），放在工具条右侧 */}
+            <Button size="sm" className="gap-2 ml-2" onClick={onAdd}>
+              <Plus className="h-4 w-4" />
+              {t.addNew}
+            </Button>
+          </div>
+        </div>
+
+        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border border-border bg-secondary">
+          <div className="flex-1 overflow-auto">
+            <table className="w-full caption-bottom text-sm">
+              <thead className="sticky top-0 z-10 border-b border-border bg-secondary">
+                <tr className="border-b border-border">
+                  <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[40px]">
+                    <Checkbox
+                      checked={allFilteredSelected ? true : someFilteredSelected ? 'indeterminate' : false}
+                      onChange={(checked) => onToggleAll(checked)}
+                    />
+                  </th>
+                  <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{t.environment}</th>
+                  <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[180px]">{t.proxy}</th>
+                  <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[260px]">{t.fingerprint}</th>
+                  <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[140px]">{t.createdAt}</th>
+                  <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[100px]">{t.status}</th>
+                  <th className="h-10 px-4 text-right align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[160px]">{t.actions}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((profile) => {
+                  const isRunning = runningIds.has(profile.id)
+                  const isBusy = busyId === profile.id
+                  const target = profile.fingerprint.targetOs as TargetOs
+                  const checked = selectedIds.has(profile.id)
+                  const occupyingRun = scriptingByProfileId.get(profile.id)
+                  const occupyingScriptName = occupyingRun ? scriptNameById.get(occupyingRun.scriptId) : undefined
+                  return (
+                    <tr key={profile.id} className="group border-b border-border transition-colors hover:bg-muted/30">
+                      <td className="p-4 align-middle">
+                        <Checkbox checked={checked} onChange={(value) => onToggleSelect(profile.id, value)} />
+                      </td>
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-sm tracking-tight">{profile.name}</span>
+                          <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[200px]">
+                            {profile.notes || profile.startUrl || '—'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-4 align-middle">
+                        <code className="text-[11px] text-accent font-mono">
+                          {profile.proxy.host}:{profile.proxy.port}
+                        </code>
+                      </td>
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col text-[11px] font-mono text-muted-foreground gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center px-1.5 py-0.5 bg-primary/15 text-primary text-[10px] font-bold tracking-wider">
+                              {targetOsLabel(target, locale)}
+                            </span>
+                            <span>{profile.fingerprint.language?.toUpperCase()} / {profile.fingerprint.timezone?.split('/').pop()}</span>
+                          </div>
+                          <span className="text-[9px] opacity-50 truncate max-w-[240px]">{profile.fingerprint.userAgent}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col text-[11px] font-mono text-muted-foreground">
+                          <span>{formatDate(profile.createdAt).date}</span>
+                          <span className="text-[10px] opacity-60">{formatDate(profile.createdAt).time}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 align-middle">
+                        {/* 状态优先级：被脚本占用 > 浏览器在跑 > 离线。
+                            被占用时点击徽章会跳到对应脚本面板；其它时候保持原显示 */}
+                        {occupyingRun ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenScript(occupyingRun.scriptId)}
+                            className="inline-flex items-center gap-2 border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-bold font-mono tracking-widest text-amber-400 hover:bg-amber-400/20"
+                            title={occupyingScriptName ? `Running script: ${occupyingScriptName}` : 'Running script'}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            <span>SCRIPTING</span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <div className={`h-1.5 w-1.5 rounded-full ${isRunning ? 'bg-primary animate-pulse shadow-[0_0_8px_var(--color-primary)]' : 'bg-muted'}`} />
+                            <span className={`text-[10px] font-bold font-mono tracking-widest ${isRunning ? 'text-primary' : 'text-muted-foreground'}`}>
+                              {isRunning ? t.online : t.offline}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-4 align-middle text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {isRunning ? (
+                            <Button variant="destructive" size="sm" className="h-8 px-3" disabled={isBusy} onClick={() => onStop(profile)}>
+                              <Square className="h-3 w-3 mr-2 fill-current" />
+                              {t.stop}
+                            </Button>
+                          ) : (
+                            <Button variant="default" size="sm" className="h-8 px-3" disabled={isBusy} onClick={() => onLaunch(profile)}>
+                              <Play className="h-3 w-3 mr-2 fill-current" />
+                              {t.run}
+                            </Button>
+                          )}
+                          <DropdownMenu
+                            trigger={
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            }
+                            items={[
+                              { label: t.details, icon: <Eye className="h-3 w-3" />, onClick: () => onShowDetails([profile.id]) },
+                              { label: t.edit, icon: <Settings2 className="h-3 w-3" />, onClick: () => onEdit(profile) },
+                              { label: t.duplicate, icon: <Copy className="h-3 w-3" />, onClick: () => onDuplicate(profile) },
+                              { label: t.delete, icon: <Trash2 className="h-3 w-3" />, variant: 'destructive', onClick: () => onAskDelete([profile.id]) }
+                            ]}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="h-32 text-center text-muted-foreground font-mono">
+                      {t.empty}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </main>
+  )
+}
+
 function Header({
   t,
   locale,
@@ -922,12 +1037,13 @@ function Header({
   runtime,
   themePref,
   onThemeChange,
-  onAdd,
-  onSettings,
-  onScripts,
-  onHome,
+  onNavigate,
   onLocaleToggle,
-  currentView
+  currentView,
+  activeRuns,
+  scripts,
+  profiles,
+  onOpenScript
 }: {
   t: Translations
   locale: Locale
@@ -937,16 +1053,24 @@ function Header({
   runtime?: RuntimeInfo
   themePref: ThemePref
   onThemeChange: (pref: ThemePref) => void
-  onAdd: () => void
-  onSettings: () => void
-  onScripts: () => void
-  onHome: () => void
+  onNavigate: (view: View) => void
   onLocaleToggle: () => void
   currentView: View
+  activeRuns: ScriptRun[]
+  scripts: Script[]
+  profiles: BrowserProfile[]
+  onOpenScript: (scriptId: string) => void
 }) {
   const ThemeIcon = themePref === 'light' ? Sun : themePref === 'dark' ? Moon : Monitor
-  const isSettings = currentView === 'settings'
-  const isScripts = currentView === 'scripts'
+
+  // 三个 tab 按钮共用同一种渲染逻辑：当前页 = default 高亮，其它 = secondary。
+  // 全部仅图标 + Tooltip 提示页名。
+  const navItems: Array<{ view: View; label: string; Icon: typeof Layers }> = [
+    { view: 'profiles', label: locale === 'zh' ? '环境' : 'Environments', Icon: Layers },
+    { view: 'scripts', label: locale === 'zh' ? '脚本' : 'Scripts', Icon: FileCode2 },
+    { view: 'settings', label: t.settings, Icon: Settings2 }
+  ]
+
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between px-6">
@@ -1011,28 +1135,34 @@ function Header({
               { label: t.themeSystem, icon: <Monitor className="h-3 w-3" />, onClick: () => onThemeChange('system') }
             ]}
           />
-          {!isSettings && !isScripts && (
-            <Button size="sm" className="gap-2" onClick={onAdd}>
-              <Plus className="h-4 w-4" />
-              {t.addNew}
-            </Button>
-          )}
-          <Button
-            variant={isScripts ? 'default' : 'secondary'}
-            size="sm"
-            onClick={isScripts ? onHome : onScripts}
-            title={locale === 'zh' ? '脚本' : 'Scripts'}
-          >
-            <FileCode2 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={isSettings ? 'default' : 'secondary'}
-            size="sm"
-            onClick={isSettings ? onHome : onSettings}
-            title={t.settings}
-          >
-            <Settings2 className="h-4 w-4" />
-          </Button>
+          {/* 全局活跃 run：图标 + 数字徽章；点开浮层看所有跨脚本运行中的 run */}
+          <ActiveRunsButton
+            locale={locale}
+            activeRuns={activeRuns}
+            scripts={scripts}
+            profiles={profiles}
+            onOpenScript={onOpenScript}
+          />
+          {/* 导航 tab 组：纯图标 + Tooltip 提示页名。当前页高亮 */}
+          <div className="ml-2 flex items-center gap-1 border-l border-border pl-3">
+            {navItems.map(({ view, label, Icon }) => {
+              const active = currentView === view
+              return (
+                <Tooltip key={view} side="bottom" content={label}>
+                  <Button
+                    variant={active ? 'default' : 'secondary'}
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    aria-label={label}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => onNavigate(view)}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </Button>
+                </Tooltip>
+              )
+            })}
+          </div>
         </div>
       </div>
     </header>

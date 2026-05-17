@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Download, Trash2, Upload, ArrowLeft, Folder } from 'lucide-react'
+import { Download, Trash2, Upload, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { interpolate } from '@/lib/i18n'
@@ -10,7 +10,6 @@ type Locale = 'en' | 'zh'
 const labels = {
   en: {
     title: 'Settings',
-    back: 'Back to environments',
     sectionKernel: 'Browser kernels',
     sectionPlugin: 'Plugins',
     sectionPaths: 'Storage',
@@ -32,7 +31,6 @@ const labels = {
   },
   zh: {
     title: '设置',
-    back: '返回环境列表',
     sectionKernel: '浏览器内核',
     sectionPlugin: '插件',
     sectionPaths: '存储',
@@ -72,14 +70,13 @@ export type SettingsViewProps = {
   runtimeInfo?: RuntimeInfo
   plugins: BrowserPlugin[]
   locale: Locale
-  onBack: () => void
   onInstallKernel: (kernel: KernelType) => void
   onImportPlugin: () => Promise<void>
   onSetActiveVersion: (pluginId: string, versionId: string) => Promise<void>
   onDeletePlugin: (pluginId: string) => Promise<void>
 }
 
-export function SettingsView({ runtimeInfo, plugins, locale, onBack, onInstallKernel, onImportPlugin, onSetActiveVersion, onDeletePlugin }: SettingsViewProps) {
+export function SettingsView({ runtimeInfo, plugins, locale, onInstallKernel, onImportPlugin, onSetActiveVersion, onDeletePlugin }: SettingsViewProps) {
   const t = labels[locale]
   const [importing, setImporting] = useState(false)
 
@@ -96,17 +93,11 @@ export function SettingsView({ runtimeInfo, plugins, locale, onBack, onInstallKe
 
   return (
     <main className="p-6 space-y-6 max-w-[1200px] mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-xl font-bold tracking-tight">{t.title}</h1>
-          <p className="text-xs text-muted-foreground">
-            {interpolate(t.fingerprintHost, { host: hostLabel(runtimeInfo), kernel: activeKernel(runtimeInfo) })}
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" className="gap-2" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4" />
-          {t.back}
-        </Button>
+      <div>
+        <h1 className="font-display text-xl font-bold tracking-tight">{t.title}</h1>
+        <p className="text-xs text-muted-foreground">
+          {interpolate(t.fingerprintHost, { host: hostLabel(runtimeInfo), kernel: activeKernel(runtimeInfo) })}
+        </p>
       </div>
 
       <Section title={t.sectionKernel}>
