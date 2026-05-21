@@ -1,4 +1,4 @@
-import type { Browser, Page } from 'puppeteer-core'
+import type { Browser, Page } from 'rebrowser-puppeteer-core'
 import type { BrowserProfile } from '../../types'
 
 /**

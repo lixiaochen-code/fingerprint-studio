@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { Browser, getInstalledBrowsers, getVersionComparator } from '@puppeteer/browsers'
-import type { BrowserProfile, HostOs, KernelStatus, KernelStatusMap, KernelType, TargetOs } from './types'
+import type { BrowserProfile, FingerprintMode, HostOs, KernelStatus, KernelStatusMap, KernelType, TargetOs } from './types'
 import { ensureFingerprintExtension, fingerprintSeed, hostOs, writeFingerprintPayload } from './fingerprint'
 import { ensureProxyAuthExtension } from './proxyAuth'
 import { browsersRoot, chromiumCacheDir, cloakRoot, configuredBrowserPath, itbrowserRoot, legacyBrowsersDir } from './paths'
@@ -175,24 +175,41 @@ export function itbrowserSupported(host: HostOs = hostOs()) {
 export type KernelSelection = {
   type: KernelType
   executable: string
-  mode: 'native' | 'cloak' | 'extension'
+  mode: 'native' | 'cloak' | 'extension' | 'stealth' | 'off'
 }
 
-export async function selectKernel(profile: BrowserProfile): Promise<KernelSelection> {
+/**
+ * 三轨反检测的择路:
+ * - mode='itbrowser' + 宿主支持 + 已装 → itbrowser
+ * - mode='cloak' + 宿主支持 + 已装 → cloak
+ * - mode='stealth' / 'extension' → chromium + 对应 inject(stealth 是完整 patch 套件,
+ *   extension 是 legacy 快速回滚通道)
+ * - mode='off' → 裸 chromium,不挂任何 inject 扩展
+ *
+ * 注:即使 mode 偏好 itbrowser/cloak,但宿主或内核不可用时会自动 fallback 到 chromium +
+ * stealth,而不是直接 throw。脚本子系统已假设浏览器一定能启动。
+ */
+export async function selectKernel(profile: BrowserProfile, mode: FingerprintMode = 'stealth'): Promise<KernelSelection> {
   const host = hostOs()
   const status = await kernelStatusMap()
   const target: TargetOs = profile.fingerprint.targetOs
 
-  if (host === 'win32' && target === 'windows' && status.itbrowser.installed && status.itbrowser.path) {
+  if (mode === 'itbrowser' && host === 'win32' && target === 'windows' && status.itbrowser.installed && status.itbrowser.path) {
     return { type: 'itbrowser', executable: status.itbrowser.path, mode: 'native' }
   }
 
-  if (cloakSupported(host) && status.cloak.installed && status.cloak.path) {
+  if (mode === 'cloak' && cloakSupported(host) && status.cloak.installed && status.cloak.path) {
     return { type: 'cloak', executable: status.cloak.path, mode: 'cloak' }
   }
 
   if (status.chromium.installed && status.chromium.path) {
-    return { type: 'chromium', executable: status.chromium.path, mode: 'extension' }
+    // chromium 三种 inject 形态:stealth (默认) / extension (legacy) / off (无注入)
+    // 把 mode 透传到 KernelSelection 让 buildLaunchArgs 决定挂什么扩展
+    const injectMode: KernelSelection['mode'] =
+      mode === 'off' ? 'off' :
+      mode === 'extension' ? 'extension' :
+      'stealth'
+    return { type: 'chromium', executable: status.chromium.path, mode: injectMode }
   }
 
   throw new KernelMissingError(cloakSupported(host) ? 'cloak' : 'chromium', 'No usable browser kernel is installed')
@@ -248,8 +265,10 @@ export function buildLaunchArgs(
   args.push(`--force-webrtc-ip-handling-policy=${profile.fingerprint.webRtcPolicy === 'disable-non-proxied-udp' ? 'disable_non_proxied_udp' : 'default'}`)
 
   const allExtensions: string[] = []
-  if (selection.mode === 'extension') {
-    allExtensions.push(ensureFingerprintExtension(profile))
+  if (selection.mode === 'extension' || selection.mode === 'stealth') {
+    // stealth → 完整 patch 套件(nativeToString + webdriver/chrome/iframe/permissions ...)
+    // extension → legacy inject(快速回滚通道,已知有 toString 漏洞)
+    allExtensions.push(ensureFingerprintExtension(profile, selection.mode))
   }
   // Proxy auth extension is independent of fingerprint mode — even itbrowser/cloak need
   // credentials delivered this way because Chromium strips them from --proxy-server.

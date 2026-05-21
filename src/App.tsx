@@ -43,6 +43,7 @@ import { ScriptsView } from './components/ScriptsView'
 import { KeepAlive } from './components/KeepAlive'
 import { ActiveRunsButton } from './components/ActiveRunsButton'
 import { interpolate } from './lib/i18n'
+import { FINGERPRINT_MODE_LABELS, type FingerprintModeKey } from './lib/fingerprintModeLabels'
 import './styles.css'
 
 type Locale = 'en' | 'zh'
@@ -98,12 +99,6 @@ type Translations = {
   fingerprintModeHint: string
   browserCrashedTitle: string
   browserCrashedDetails: string
-  fingerprintModes: {
-    extension: { title: string; description: string }
-    cloak: { title: string; description: string }
-    itbrowser: { title: string; description: string }
-    off: { title: string; description: string }
-  }
 }
 
 const translations: Record<Locale, Translations> = {
@@ -156,25 +151,7 @@ const translations: Record<Locale, Translations> = {
     themeSystem: 'System',
     fingerprintModeHint: 'How browser fingerprint is being spoofed for every profile.',
     browserCrashedTitle: 'Browser exited unexpectedly: {{name}}',
-    browserCrashedDetails: 'Exit code {{code}}{{signal}}. Check the log for details.',
-    fingerprintModes: {
-      extension: {
-        title: 'Extension mode',
-        description: 'A local Chrome extension rewrites navigator, WebGL, Canvas, AudioContext, fonts, etc. at the JavaScript layer. Works on every host platform with vanilla Chromium. Medium strength — deep stack details may still leak. Used as fallback when no source-level kernel is available.'
-      },
-      cloak: {
-        title: 'Cloak mode',
-        description: 'Uses CloakBrowser — a custom-built Chromium with 49+ source-level C++ patches covering canvas, WebGL, audio, fonts, GPU, screen, WebRTC, and automation signals. Strongest cross-platform fingerprint coverage. Linux/Windows only (no macOS upstream binary).'
-      },
-      itbrowser: {
-        title: 'itbrowser mode',
-        description: 'Uses the patched itbrowser Chromium kernel via --itbrowser=fingerprint.json so the spoofing happens inside the browser engine itself. Strong fingerprint coverage but Windows-only.'
-      },
-      off: {
-        title: 'Spoofing disabled',
-        description: 'No fingerprint rewriting. Each environment still has an isolated user-data dir and proxy, but all fingerprint surfaces report the real machine.'
-      }
-    }
+    browserCrashedDetails: 'Exit code {{code}}{{signal}}. Check the log for details.'
   },
   zh: {
     appName: '环境管理器',
@@ -225,25 +202,7 @@ const translations: Record<Locale, Translations> = {
     themeSystem: '跟随系统',
     fingerprintModeHint: '当前为每个环境改写浏览器指纹的方式。',
     browserCrashedTitle: '浏览器异常退出：{{name}}',
-    browserCrashedDetails: '退出码 {{code}}{{signal}}。可在日志中查看详情。',
-    fingerprintModes: {
-      extension: {
-        title: '扩展模式',
-        description: '通过加载本地 Chrome 扩展，在 JavaScript 层面改写 navigator、WebGL、Canvas、AudioContext、字体等指纹面。三平台通用，强度中等——深层栈信息仍可能泄露。仅在内核级方案不可用时作为兜底。'
-      },
-      cloak: {
-        title: 'Cloak 模式',
-        description: '使用 CloakBrowser —— 自定义编译的 Chromium，包含 49+ 项 C++ 源码级补丁，覆盖 canvas、WebGL、audio、字体、GPU、screen、WebRTC、自动化信号等。跨平台强度最高。仅 Linux/Windows 提供二进制（macOS 上游未发布）。'
-      },
-      itbrowser: {
-        title: 'itbrowser 模式',
-        description: '使用打过补丁的 itbrowser Chromium 内核，通过 --itbrowser=fingerprint.json 在内核层面改写指纹。强度高但仅 Windows 可用。'
-      },
-      off: {
-        title: '未启用',
-        description: '不改写指纹。每个环境仍使用独立的 user-data 目录和代理，但所有指纹面都暴露真实机器信息。'
-      }
-    }
+    browserCrashedDetails: '退出码 {{code}}{{signal}}。可在日志中查看详情。'
   }
 }
 
@@ -721,15 +680,15 @@ export function App() {
   )
 }
 
-function FingerprintBadge({ runtime, t }: { runtime?: RuntimeInfo; t: Translations }) {
+function FingerprintBadge({ runtime, t, locale }: { runtime?: RuntimeInfo; t: Translations; locale: Locale }) {
   const enabled = runtime?.fingerprintSpoofingEnabled
   const Icon = enabled ? AlertTriangle : ShieldCheck
   const tone = enabled ? 'border-amber-400/40 bg-amber-400/10 text-amber-300' : 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
   const title = enabled
     ? interpolate(t.riskTitle, { mode: runtime?.fingerprintMode?.toUpperCase() || '—' })
     : t.secureTitle
-  const modeKey = (runtime?.fingerprintMode || 'off') as 'extension' | 'cloak' | 'itbrowser' | 'off'
-  const detail = t.fingerprintModes[modeKey]
+  const modeKey = (runtime?.fingerprintMode || 'off') as FingerprintModeKey
+  const detail = FINGERPRINT_MODE_LABELS[locale][modeKey]
   return (
     <Tooltip
       side="bottom"
@@ -828,7 +787,7 @@ function ProfilesPanel({
     <main className="flex flex-1 flex-col overflow-hidden">
       <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden p-6 gap-4">
         <div className="flex items-center gap-3">
-          <FingerprintBadge runtime={runtimeInfo} t={t} />
+          <FingerprintBadge runtime={runtimeInfo} t={t} locale={locale} />
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -1091,10 +1050,10 @@ function Header({
                 content={
                   <div className="space-y-1">
                     <div className="font-display text-[11px] font-bold uppercase tracking-wider text-primary">
-                      {t.fingerprintModes[(runtime?.fingerprintMode || 'off') as 'extension' | 'cloak' | 'itbrowser' | 'off'].title}
+                      {FINGERPRINT_MODE_LABELS[locale][(runtime?.fingerprintMode || 'off') as FingerprintModeKey].title}
                     </div>
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      {t.fingerprintModes[(runtime?.fingerprintMode || 'off') as 'extension' | 'cloak' | 'itbrowser' | 'off'].description}
+                      {FINGERPRINT_MODE_LABELS[locale][(runtime?.fingerprintMode || 'off') as FingerprintModeKey].description}
                     </p>
                   </div>
                 }

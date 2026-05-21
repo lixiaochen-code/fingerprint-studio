@@ -6,9 +6,20 @@
 ## 0. 当前快照
 
 - **分支**：`main`
-- **远端最新提交**：Phase 3 Step 4 + 占用规则三步走（待 commit / push 本轮改动）
-- **完成进度**：Phase 3 全部 4 步代码已落地；脚本占用规则三步走代码已落地。
-- **未做的事**：手工 UI 验证 Step 3、Step 4 + 占用规则。新机器接手第一件事是把 §10c（Step 3 + 重构）+ §11（Step 4）+ §11b（占用规则）一起跑一遍。
+- **远端最新提交**：反检测双轨集成(A + B)Phase 1 + Phase 2 代码已落地;Phase 3(Settings UI + C 路线 UI)待办。Phase 3 之前的脚本子系统改动:Phase 3 Step 4 + 占用规则三步走 + 代理连通性测试。
+- **完成进度**：脚本子系统 Phase 3 全部 4 步代码已落地;脚本占用规则三步走代码已落地;反检测双轨 A+B 已落地。
+- **未做的事**:
+  - 手工 UI 验证脚本子系统 Step 3、Step 4 + 占用规则(详见 §10c / §11 / §11b)
+  - 手工验证反检测 A 路线效果(creepjs / ChatGPT 实测,详见 [`anti-detection.md`](anti-detection.md) §3)
+  - 反检测 Phase 3(Settings UI + 持久化 + C 路线 UI 切换)
+
+## 0a. 反检测体系(新)
+
+详细 spec:[`anti-detection.md`](anti-detection.md)。一句话:
+
+- **A 路线 Stealth Inject**(默认启用):重写 fingerprint inject,加 native-toString proxy + webdriver/chrome/iframe/permissions 等 patch。解决 ChatGPT 验证循环。模块在 `electron/stealth/`
+- **B 路线 Rebrowser puppeteer**(默认启用):`puppeteer-core` → `rebrowser-puppeteer-core` in-place 替换。bootstrap 劫持 `require('puppeteer-core')`。用户脚本零改动
+- **C 路线 Cloak/itbrowser**(可选):已部分集成,Phase 3 加 UI 让用户按系统切换
 
 ## 0a. 占用规则（最新一轮）
 
@@ -148,6 +159,7 @@ src/
 | Dev/Prod 分离 | `Script.source: 'local' \| 'external'`；external 只记 entryPath，`writeSource` 拒写，state 落 `<scriptsRoot>/external-states/<id>/` 隔离 | `scripts/store.ts` + `runtime.ts` |
 | 日志双通道 | SDK 只走 IPC（`[info/warn/error]`），用户 `console.log` 只走 stdout（`[stdout]`），两者不打架 | `bootstrap.ts` postLog |
 | 依赖策略 MVP | 固定内置：`puppeteer-core` `cheerio` `axios` `dayjs` `zod`。不搞白名单自装 | 已 install |
+| **CDP 反检测** | `puppeteer-core` 实际被 [bootstrap 劫持](../../electron/scripts/bootstrap.ts) 到 `rebrowser-puppeteer-core` — 用户脚本零感,SDK 内部直接 import rebrowser。规避 `Runtime.enable` 探测 | `bootstrap.ts` + `sdk/browser.ts` + [`anti-detection.md`](anti-detection.md) §4 |
 | UI 集成 | 主窗口加第三个 tab "Scripts"，与 Environments/Settings 并列 | `App.tsx` + `ScriptsView.tsx` |
 | **Monaco 单实例** | `loader.config({ monaco })` 让 `@monaco-editor/react` 用我们 import 的本地 monaco 而不是 CDN，否则 setCompilerOptions 配的是另一份实例 | `ScriptEditor.tsx` |
 | Monaco 类型源 | **合并版** ambient d.ts：把 auto-registry / puppeteer-core 真包 / axios / dayjs / zod / cheerio 全塞进**一份** extraLib 文件。跨文件 ambient import 不可靠 | `scriptTypings.ts` |
@@ -390,9 +402,11 @@ Phase 4 Dev Server / Phase 5 模板市场 暂不在视野。
 
 `§11` + `§11b` 全绿后 Phase 3 Done。后续候选（按优先级，等用户拍板）：
 
+- **反检测 Phase 3**:Settings UI + SettingsStore 持久化 + C 路线(Cloak/itbrowser)显式 UI 切换。详见 [`anti-detection.md`](anti-detection.md) §6
 - **Phase 4 Dev Server**：本地 HTTP/WebSocket 让外部 VSCode 项目通过 `auto-registry-sdk-client` 包反向调用应用 SDK
 - **Phase 5 模板市场**：预设 3-5 个常用脚本（Amazon 登录、采集、批量操作）
 - ✅ ~~代理连通性测试按钮~~ —— 已实装（见 §11c）
+- ✅ ~~反检测 A+B 路线集成~~ —— 已实装(见 [`anti-detection.md`](anti-detection.md))
 - **集中日志到 `<userData>/logs/`**（pending 已久）
 
 ---

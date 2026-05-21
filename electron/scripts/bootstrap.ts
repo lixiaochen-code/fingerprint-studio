@@ -69,11 +69,20 @@ function safeStringify(value: unknown): string {
 }
 
 /**
- * 劫持 `require('auto-registry')`：
- * Node 的 Module._resolveFilename 是公开且稳定的 internal，在我们 100% 控制
- * 这个进程的前提下这么做是可以接受的。我们只改 'auto-registry' 这一个专用包名。
+ * 一次性安装两类 require 劫持:
+ * 1. `require('auto-registry')` → 虚拟模块,导出 createScriptApi 产物
+ * 2. `require('puppeteer-core')` / `require('puppeteer')` → 实际路径指向 rebrowser-puppeteer-core
+ *
+ * Node 的 Module._resolveFilename 是公开且稳定的 internal,在我们 100% 控制
+ * 这个进程的前提下这么做是可以接受的。
+ *
+ * 关键设计:
+ * - **严格相等**匹配 specifier(`===`),不能 startsWith — 否则会拦截 rebrowser
+ *   内部的 `puppeteer-core/lib/cjs/...` 子模块导致递归
+ * - rebrowserPath 在 fork 子进程一启动时就 resolve 并缓存,运行时不再重算
+ * - 两类劫持合并进同一个 _resolveFilename 拦截,避免链式 wrap
  */
-function installAutoRegistryModule(api: object, cleanup: { dispose: () => Promise<void> }): void {
+function installModuleInterceptions(api: object, cleanup: { dispose: () => Promise<void> }, rebrowserPath: string): void {
   const moduleInternals = Module as unknown as {
     _resolveFilename: (request: string, parent: NodeModule, ...rest: unknown[]) => string
     _cache: Record<string, NodeModule>
@@ -94,10 +103,13 @@ function installAutoRegistryModule(api: object, cleanup: { dispose: () => Promis
 
   moduleInternals._resolveFilename = function patchedResolve(request, parent, ...rest) {
     if (request === 'auto-registry') return syntheticPath
+    // 用户脚本 `from 'puppeteer-core'` 或 `from 'puppeteer'` 透明走 rebrowser,
+    // SDK 内部已直接 import 'rebrowser-puppeteer-core',这里只为用户脚本服务。
+    if (request === 'puppeteer-core' || request === 'puppeteer') return rebrowserPath
     return originalResolveFilename.call(this, request, parent, ...rest)
   }
 
-  // 确保进程退出时释放浏览器连接；用户没主动 disconnect 也没关系
+  // 确保进程退出时释放浏览器连接;用户没主动 disconnect 也没关系
   process.on('exit', () => {
     void cleanup.dispose()
   })
@@ -165,7 +177,10 @@ async function main(): Promise<void> {
   }
 
   const api = createScriptApi(context)
-  installAutoRegistryModule(api, { dispose: () => api.__dispose() })
+  // require('puppeteer-core') 在用户脚本运行前就要被劫持到 rebrowser 路径,因此提前 resolve。
+  // require.resolve 在父进程 node_modules 拓扑下永远 work,即便打进 asar 也是普通文件解析。
+  const rebrowserPath = require.resolve('rebrowser-puppeteer-core')
+  installModuleInterceptions(api, { dispose: () => api.__dispose() }, rebrowserPath)
 
   process.on('unhandledRejection', (reason) => {
     postLog('error', ['Unhandled rejection:', reason])

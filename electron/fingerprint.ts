@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { BrowserProfile, FingerprintConfig, HostOs, TargetOs, TargetOsChoice } from './types'
+import { buildStealthInjectScript, togglesFromEnv } from './stealth'
 
 const languages = ['zh-CN', 'en-US', 'en-GB', 'ja-JP', 'de-DE', 'fr-FR']
 const timezones = ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo']
@@ -194,44 +195,14 @@ export function writeFingerprintPayload(profile: BrowserProfile) {
   return configPath
 }
 
-export function ensureFingerprintExtension(profile: BrowserProfile) {
-  const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')
-  fs.mkdirSync(extensionPath, { recursive: true })
-  const manifest = {
-    manifest_version: 3,
-    name: 'Auto Registry Fingerprint',
-    version: '1.0.0',
-    description: 'Applies per-profile browser fingerprint settings.',
-    content_scripts: [
-      {
-        matches: ['<all_urls>'],
-        js: ['content.js'],
-        run_at: 'document_start',
-        all_frames: true
-      }
-    ],
-    web_accessible_resources: [
-      {
-        resources: ['inject.js'],
-        matches: ['<all_urls>']
-      }
-    ]
-  }
+export type FingerprintInjectMode = 'stealth' | 'extension'
 
-  const config = JSON.stringify(fingerprintPayload(profile.fingerprint))
-  const content = `
-const configTag = document.createElement('script');
-configTag.id = 'auto-registry-fingerprint-config';
-configTag.type = 'application/json';
-configTag.textContent = ${JSON.stringify(config)};
-(document.documentElement || document.head).appendChild(configTag);
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('inject.js');
-script.onload = () => script.remove();
-(document.documentElement || document.head).appendChild(script);
-`
-
-  const inject = `
+/**
+ * Legacy inject — 由 `mode='extension'` 触发,作为 stealth 路径的快速回滚通道。
+ * 已知漏洞:Object.defineProperty 的 getter 用箭头函数,`.get.toString()` 暴露源码,
+ * 一行 JS 就识破。仅保留作为应急对照,不要在 stealth 模式下使用。
+ */
+const LEGACY_INJECT = `
 (() => {
   const configNode = document.getElementById('auto-registry-fingerprint-config');
   if (!configNode) return;
@@ -331,6 +302,47 @@ script.onload = () => script.remove();
   }
 })();
 `
+
+export function ensureFingerprintExtension(profile: BrowserProfile, mode: FingerprintInjectMode = 'stealth') {
+  const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')
+  fs.mkdirSync(extensionPath, { recursive: true })
+  const manifest = {
+    manifest_version: 3,
+    name: 'Auto Registry Fingerprint',
+    version: '1.0.0',
+    description: 'Applies per-profile browser fingerprint settings.',
+    content_scripts: [
+      {
+        matches: ['<all_urls>'],
+        js: ['content.js'],
+        run_at: 'document_start',
+        all_frames: true
+      }
+    ],
+    web_accessible_resources: [
+      {
+        resources: ['inject.js'],
+        matches: ['<all_urls>']
+      }
+    ]
+  }
+
+  const config = JSON.stringify(fingerprintPayload(profile.fingerprint))
+  const content = `
+const configTag = document.createElement('script');
+configTag.id = 'auto-registry-fingerprint-config';
+configTag.type = 'application/json';
+configTag.textContent = ${JSON.stringify(config)};
+(document.documentElement || document.head).appendChild(configTag);
+const script = document.createElement('script');
+script.src = chrome.runtime.getURL('inject.js');
+script.onload = () => script.remove();
+(document.documentElement || document.head).appendChild(script);
+`
+
+  // mode='stealth' 走完整 patch 套件(含 nativeToString 伪装、webdriver/chrome/iframe/permissions 等)
+  // mode='extension' 走老的 LEGACY_INJECT,留作快速回滚通道
+  const inject = mode === 'stealth' ? buildStealthInjectScript(togglesFromEnv()) : LEGACY_INJECT
 
   fs.writeFileSync(path.join(extensionPath, 'manifest.json'), JSON.stringify(manifest, null, 2))
   fs.writeFileSync(path.join(extensionPath, 'content.js'), content)

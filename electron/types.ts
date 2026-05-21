@@ -69,7 +69,7 @@ export type BrowserCrashEvent = {
   stderrTail?: string
 }
 
-export type FingerprintMode = 'off' | 'extension' | 'cloak' | 'itbrowser'
+export type FingerprintMode = 'off' | 'extension' | 'stealth' | 'cloak' | 'itbrowser'
 
 export type KernelType = 'chromium' | 'cloak' | 'itbrowser'
 

@@ -1,4 +1,4 @@
-import puppeteer, { type Browser, type Page } from 'puppeteer-core'
+import puppeteer, { type Browser, type Page } from 'rebrowser-puppeteer-core'
 
 /**
  * 把脚本对浏览器的访问收拢到一个类里：

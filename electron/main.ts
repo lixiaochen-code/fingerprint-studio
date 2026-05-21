@@ -44,11 +44,11 @@ function message(en: string, zh: string) {
 
 function fingerprintMode(): FingerprintMode {
   const mode = (process.env.AUTO_REGISTRY_FINGERPRINT_MODE || '').toLowerCase()
-  if (mode === 'off' || mode === 'extension' || mode === 'cloak' || mode === 'itbrowser') return mode as FingerprintMode
+  if (mode === 'off' || mode === 'extension' || mode === 'stealth' || mode === 'cloak' || mode === 'itbrowser') return mode as FingerprintMode
   if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '0') return 'off'
   if (process.env.AUTO_REGISTRY_ENABLE_FINGERPRINT === '1') return 'itbrowser'
-  // auto: prefer cloak on supported hosts, fall back to extension
-  return cloakSupported() ? 'cloak' : 'extension'
+  // 默认 = stealth(全平台最强反检测,A 路线)。Phase 3 接 SettingsStore 后用户可在 UI 切到 cloak/itbrowser。
+  return 'stealth'
 }
 
 function fingerprintSpoofingEnabled() {
@@ -256,7 +256,7 @@ async function launchProfile(profile: BrowserProfile, options: { openStartUrl?: 
     return
   }
 
-  const selection = await selectKernel(profile)
+  const selection = await selectKernel(profile, fingerprintMode())
   assertLaunchableBrowser(selection.executable)
 
   const activePlugins = store.activePluginVersions(profile.enabledPluginIds)

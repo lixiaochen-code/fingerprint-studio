@@ -119,6 +119,14 @@ ${puppeteerTypesRaw
   .replace(/^declare\s+/gm, '') // 去掉行首 `declare `，否则在 declare module 块内会报错
 }
 }
+
+// rebrowser-puppeteer-core 是 puppeteer-core 的 in-place fork —— 由 bootstrap.ts 把用户脚本
+// 里的 'puppeteer-core' specifier 透明劫持到 rebrowser-puppeteer-core。类型表面 100% 一致;
+// 若用户脚本写 from 'rebrowser-puppeteer-core',Monaco 也能补全到同一份签名。
+declare module 'rebrowser-puppeteer-core' {
+  export * from 'puppeteer-core'
+  export { default } from 'puppeteer-core'
+}
 `.trim()
 
 const AXIOS_BLOCK = `
