@@ -5,7 +5,7 @@ import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { URL } from 'node:url'
-import { install, Browser } from '@puppeteer/browsers'
+import { install, Browser, BrowserTag, detectBrowserPlatform, resolveBuildId } from '@puppeteer/browsers'
 import { extractFull } from 'node-7z'
 import sevenBin from '7zip-bin'
 import type { KernelInstallProgress, KernelType } from './types'
@@ -15,7 +15,12 @@ import { hostOs } from './fingerprint'
 const execFileAsync = promisify(execFile)
 
 const ITBROWSER_RELEASE = 'https://github.com/itbrowser-net/undetectable-fingerprint-browser/releases/download/v1.0.1/finngerprints-browser-v1.0.1.7z'
-const CHROMIUM_BUILD_ID = '1627652'
+// 走 Chrome for Testing(Browser.CHROME)而不是 Chromium 快照(Browser.CHROMIUM)。
+// 后者在 puppeteer cache 里是 commit 号(如 '1627652'),实际对应 Chromium 主线某次 CI 构建,
+// 报给页面的 Chrome 版本号是构建时所在的 milestone branch —— 历史上钉死的 '1627652' 是 M123,
+// Turnstile 2026Q2 起拒绝 < v146 的内核,直接报 "Unsupported Browser"。
+// Chrome for Testing 用语义版本号(如 '149.0.7827.22'),且 BrowserTag.STABLE 永远解析到最新
+// 稳定版,以后 Cloudflare 再加门槛我们也跟得上,不用每次手动改版本号。
 const CLOAK_RELEASE_TAG = 'chromium-v146.0.7680.177.4'
 
 export type ProgressListener = (progress: KernelInstallProgress) => void
@@ -95,13 +100,22 @@ function downloadFile(url: string, destination: string, token: CancellationToken
 }
 
 async function installChromium(token: CancellationToken, listener: ProgressListener) {
-  emit(listener, { kernel: 'chromium', phase: 'pending', message: 'Preparing Chromium download' })
+  emit(listener, { kernel: 'chromium', phase: 'pending', message: 'Resolving latest stable Chrome' })
   const cacheDir = chromiumCacheDir()
   fs.mkdirSync(cacheDir, { recursive: true })
 
+  const platform = detectBrowserPlatform()
+  if (!platform) {
+    throw new Error('Cannot detect browser platform for this OS/arch')
+  }
+  // 动态解析 stable —— 每次安装都拿最新稳定版,避免再钉死成历史版本被 Turnstile 拒收。
+  const buildId = await resolveBuildId(Browser.CHROME, platform, BrowserTag.STABLE)
+  token.throwIfCanceled()
+  emit(listener, { kernel: 'chromium', phase: 'pending', message: `Preparing Chrome ${buildId} download` })
+
   await install({
-    browser: Browser.CHROMIUM,
-    buildId: CHROMIUM_BUILD_ID,
+    browser: Browser.CHROME,
+    buildId,
     cacheDir,
     downloadProgressCallback: (downloadedBytes: number, totalBytes: number) => {
       if (token.isCanceled) throw new Error('Installation canceled')
@@ -115,7 +129,7 @@ async function installChromium(token: CancellationToken, listener: ProgressListe
   })
 
   token.throwIfCanceled()
-  emit(listener, { kernel: 'chromium', phase: 'done', message: 'Chromium installed' })
+  emit(listener, { kernel: 'chromium', phase: 'done', message: `Chrome ${buildId} installed` })
 }
 
 async function installItbrowser(token: CancellationToken, listener: ProgressListener) {

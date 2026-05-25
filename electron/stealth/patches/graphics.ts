@@ -15,15 +15,23 @@ export const GRAPHICS_PATCH = `
   const screenData = payload.screen || {};
 
   // ---- WebGL ----
+  // 重要:**只**覆盖 UNMASKED_VENDOR_WEBGL (37445) / UNMASKED_RENDERER_WEBGL (37446)。
+  // VENDOR (7936) / RENDERER (7937) 在真实 Chrome 上是固定值 "WebKit" / "WebKit WebGL",
+  // 不是 GPU 信息。之前的实现把这俩也替换成了 GPU 字符串 —— Cloudflare/Turnstile 一句
+  // gl.getParameter(gl.VENDOR) 看到 "Apple Inc." 而不是 "WebKit" 立刻识破"WebGL 被
+  // 伪造"。修复:VENDOR/RENDERER 走 original,绝不替换。
+  //
+  // 限制:UNMASKED 信息伪造仍可能被进一步检测识破 —— getSupportedExtensions / getShaderPrecisionFormat
+  // 和渲染基准都和真实 GPU 强相关,我们盖不住。跨 OS 伪造(Mac 上装 Windows 指纹)时
+  // payload.webgl.vendor/renderer 会为空,这里完全跳过,让真实 GPU 值透出,牺牲 OS
+  // 伪装但避开"WebGL 被伪造"这个明显 tell。彻底解需要 C 轨(cloak/itbrowser)。
   function patchWebGLContext(Ctor) {
     if (!Ctor || !Ctor.prototype || !Ctor.prototype.getParameter) return;
+    if (!webgl.vendor && !webgl.renderer) return; // 跨 OS 场景,跳过整个 WebGL patch
     const originalGetParameter = Ctor.prototype.getParameter;
     helper.replaceMethod(Ctor.prototype, 'getParameter', function getParameter(parameter) {
       if (parameter === 37445 && webgl.vendor) return webgl.vendor;       // UNMASKED_VENDOR_WEBGL
       if (parameter === 37446 && webgl.renderer) return webgl.renderer;   // UNMASKED_RENDERER_WEBGL
-      // VENDOR (7936) 与 RENDERER (7937) 一些站点也查 — 用同样 vendor/renderer 兜底
-      if (parameter === 7936 && webgl.vendor) return webgl.vendor;
-      if (parameter === 7937 && webgl.renderer) return webgl.renderer;
       return originalGetParameter.call(this, parameter);
     });
   }

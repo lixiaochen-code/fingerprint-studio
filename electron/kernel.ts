@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { Browser, getInstalledBrowsers, getVersionComparator } from '@puppeteer/browsers'
 import type { BrowserProfile, FingerprintMode, HostOs, KernelStatus, KernelStatusMap, KernelType, TargetOs } from './types'
-import { ensureFingerprintExtension, fingerprintSeed, hostOs, writeFingerprintPayload } from './fingerprint'
+import { ensureFingerprintExtension, fingerprintSeed, hostOs, writeFingerprintPayload, alignUserAgentWithKernel } from './fingerprint'
 import { ensureProxyAuthExtension } from './proxyAuth'
 import { browsersRoot, chromiumCacheDir, cloakRoot, configuredBrowserPath, itbrowserRoot, legacyBrowsersDir } from './paths'
 
@@ -66,8 +66,11 @@ async function chromiumStatus(): Promise<KernelStatus> {
         byFamily.set(browser.browser, list)
       }
 
-      // Prefer Chromium (that's what we install); fall back to Chrome if only Chrome is around.
-      const preferenceOrder: Browser[] = [Browser.CHROMIUM, Browser.CHROME]
+      // Prefer Chrome (Chrome for Testing — new install path) over Chromium snapshots
+      // (legacy install path with hard-coded build ID). Old Chromium 123 binaries
+      // still on disk would otherwise win the version sort within their own family
+      // and bypass the upgrade to a Turnstile-supported version (>= v146).
+      const preferenceOrder: Browser[] = [Browser.CHROME, Browser.CHROMIUM]
       let found: typeof usable[number] | undefined
       for (const family of preferenceOrder) {
         const list = byFamily.get(family)
@@ -176,6 +179,13 @@ export type KernelSelection = {
   type: KernelType
   executable: string
   mode: 'native' | 'cloak' | 'extension' | 'stealth' | 'off'
+  /**
+   * 真实安装的 kernel 版本(Chrome for Testing 是 "149.0.7827.22" 这种语义版本,
+   * Chromium 老快照是纯数字 build id)。启动时用它把 profile.fingerprint.userAgent
+   * 里的 Chrome 版本段对齐到真实版本 —— 否则 Turnstile 拿 UA vs 真实内核交叉校验
+   * 直接判 bot;即便不查 client hints,光看 UA 数字也会被卡 < v146 门槛。
+   */
+  version?: string
 }
 
 /**
@@ -195,11 +205,11 @@ export async function selectKernel(profile: BrowserProfile, mode: FingerprintMod
   const target: TargetOs = profile.fingerprint.targetOs
 
   if (mode === 'itbrowser' && host === 'win32' && target === 'windows' && status.itbrowser.installed && status.itbrowser.path) {
-    return { type: 'itbrowser', executable: status.itbrowser.path, mode: 'native' }
+    return { type: 'itbrowser', executable: status.itbrowser.path, mode: 'native', version: status.itbrowser.version }
   }
 
   if (mode === 'cloak' && cloakSupported(host) && status.cloak.installed && status.cloak.path) {
-    return { type: 'cloak', executable: status.cloak.path, mode: 'cloak' }
+    return { type: 'cloak', executable: status.cloak.path, mode: 'cloak', version: status.cloak.version }
   }
 
   if (status.chromium.installed && status.chromium.path) {
@@ -209,7 +219,7 @@ export async function selectKernel(profile: BrowserProfile, mode: FingerprintMod
       mode === 'off' ? 'off' :
       mode === 'extension' ? 'extension' :
       'stealth'
-    return { type: 'chromium', executable: status.chromium.path, mode: injectMode }
+    return { type: 'chromium', executable: status.chromium.path, mode: injectMode, version: status.chromium.version }
   }
 
   throw new KernelMissingError(cloakSupported(host) ? 'cloak' : 'chromium', 'No usable browser kernel is installed')
@@ -233,10 +243,18 @@ export function buildLaunchArgs(
   proxyUrl: string,
   options: BuildLaunchArgsOptions = {}
 ) {
+  // 把 UA 对齐到真实 kernel 版本,避免 Turnstile 看到"UA 说 Chrome 131 但内核是 149"
+  // 这种矛盾,或者 UA 数字低于 v146 门槛被直接拦。
+  // 这里只对内存中的 profile 做副本改造,不写回存储 —— 用户更新内核时下次启动会自动跟上。
+  const alignedUa = alignUserAgentWithKernel(profile.fingerprint.userAgent, selection.version)
+  const launchProfile: BrowserProfile = alignedUa === profile.fingerprint.userAgent
+    ? profile
+    : { ...profile, fingerprint: { ...profile.fingerprint, userAgent: alignedUa } }
+
   const args = [
-    `--user-data-dir=${profile.profilePath}`,
+    `--user-data-dir=${launchProfile.profilePath}`,
     `--proxy-server=${proxyUrl}`,
-    `--window-size=${profile.fingerprint.viewport.width},${profile.fingerprint.viewport.height}`,
+    `--window-size=${launchProfile.fingerprint.viewport.width},${launchProfile.fingerprint.viewport.height}`,
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
@@ -249,30 +267,30 @@ export function buildLaunchArgs(
   ]
 
   if (selection.mode === 'native' && selection.type === 'itbrowser') {
-    const fingerprintConfigPath = writeFingerprintPayload(profile)
+    const fingerprintConfigPath = writeFingerprintPayload(launchProfile)
     args.push(`--itbrowser=${fingerprintConfigPath}`)
   }
 
   if (selection.mode === 'cloak') {
-    args.push(`--fingerprint=${fingerprintSeed(profile.id)}`)
+    args.push(`--fingerprint=${fingerprintSeed(launchProfile.id)}`)
     args.push('--fingerprint-webrtc-ip=auto')
-    args.push(`--timezone=${profile.fingerprint.timezone}`)
-    args.push(`--lang=${profile.fingerprint.language}`)
+    args.push(`--timezone=${launchProfile.fingerprint.timezone}`)
+    args.push(`--lang=${launchProfile.fingerprint.language}`)
   }
 
-  args.push(`--user-agent=${profile.fingerprint.userAgent}`)
-  args.push(`--lang=${profile.fingerprint.language}`)
-  args.push(`--force-webrtc-ip-handling-policy=${profile.fingerprint.webRtcPolicy === 'disable-non-proxied-udp' ? 'disable_non_proxied_udp' : 'default'}`)
+  args.push(`--user-agent=${launchProfile.fingerprint.userAgent}`)
+  args.push(`--lang=${launchProfile.fingerprint.language}`)
+  args.push(`--force-webrtc-ip-handling-policy=${launchProfile.fingerprint.webRtcPolicy === 'disable-non-proxied-udp' ? 'disable_non_proxied_udp' : 'default'}`)
 
   const allExtensions: string[] = []
   if (selection.mode === 'extension' || selection.mode === 'stealth') {
     // stealth → 完整 patch 套件(nativeToString + webdriver/chrome/iframe/permissions ...)
     // extension → legacy inject(快速回滚通道,已知有 toString 漏洞)
-    allExtensions.push(ensureFingerprintExtension(profile, selection.mode))
+    allExtensions.push(ensureFingerprintExtension(launchProfile, selection.mode))
   }
   // Proxy auth extension is independent of fingerprint mode — even itbrowser/cloak need
   // credentials delivered this way because Chromium strips them from --proxy-server.
-  const proxyAuthExt = ensureProxyAuthExtension(profile)
+  const proxyAuthExt = ensureProxyAuthExtension(launchProfile)
   if (proxyAuthExt) allExtensions.push(proxyAuthExt)
 
   allExtensions.push(...extensionPaths)

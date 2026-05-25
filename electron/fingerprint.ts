@@ -18,11 +18,19 @@ const macFontsAlt = ['Helvetica Neue', 'Arial', 'Times New Roman', 'Courier New'
 const windowsFonts = ['Segoe UI', 'Calibri', 'Cambria', 'Arial', 'Verdana']
 const linuxFonts = ['Ubuntu', 'DejaVu Sans', 'Liberation Sans', 'Arial', 'Noto Sans']
 
+// macOS 真实 Chrome 的 WebGL renderer 永远是 ANGLE 包装格式 —— Chromium 在 Mac 用 Metal
+// 后端,所有 WebGL 调用穿过 ANGLE 翻译层,UNMASKED 返回值必带 "ANGLE (Apple, ANGLE Metal
+// Renderer: ...)" 前缀。裸 "Apple Inc." / "Apple M2" 是 chrome://gpu 内部显示格式,
+// **不是** JS 端 `gl.getParameter(UNMASKED_RENDERER_WEBGL)` 真实能拿到的字符串。
+// Cloudflare/Turnstile 一句 `renderer.includes('ANGLE')` 就识破。所有条目必须是 ANGLE 格式。
 const macRenderers: Array<[string, string]> = [
-  ['Apple Inc.', 'Apple M1'],
-  ['Apple Inc.', 'Apple M2'],
-  ['Apple Inc.', 'Apple M3'],
-  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)']
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)'],
+  ['Google Inc. (Apple)', 'ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)']
 ]
 const windowsRenderers: Array<[string, string]> = [
   ['Google Inc. (Intel)', 'ANGLE (Intel, Intel(R) Iris(TM) Plus Graphics, OpenGL 4.1)'],
@@ -39,7 +47,11 @@ function pick<T>(items: T[]): T {
 }
 
 function chromeVersion() {
-  const major = 120 + Math.floor(Math.random() * 12)
+  // 范围必须 ≥ Cloudflare Turnstile 的最低门槛(2026Q2 起为 v146+)。低于这个范围
+  // 直接被官方 "Unsupported Browser" 拦截。同时启动期还会被 alignUserAgentWithKernel
+  // 强制改成真实 kernel 版本,这里只是 profile 持久化时的兜底 —— 即便 kernel 没装好
+  // 也别让 UA 跌破门槛。需要时同步抬高下限。
+  const major = 146 + Math.floor(Math.random() * 4)
   return `${major}.0.${Math.floor(1000 + Math.random() * 7999)}.${Math.floor(10 + Math.random() * 89)}`
 }
 
@@ -144,6 +156,29 @@ export function makeFingerprint(partial?: Partial<FingerprintConfig>, choice?: T
 
 export function fingerprintPayload(fingerprint: FingerprintConfig) {
   const languages = [fingerprint.language, String(fingerprint.language || '').split('-')[0]].filter(Boolean)
+  // 跨 OS 时 WebGL 伪造一定漏 —— getSupportedExtensions / getShaderPrecisionFormat / 渲染基准
+  // 都强相关于真实 GPU 家族,inject 层盖不住。Turnstile 已经能识破"WebGL renderer is spoofed",
+  // 索性在 payload 边界把 webgl 字段清空,graphics patch 看到空就完全跳过 WebGL hook,让真实
+  // GPU 透出。牺牲 OS 伪装强度换不被识破 —— 想要跨 OS 全套伪造请走 cloak/itbrowser。
+  const host = hostOs()
+  const hostMatchesTarget =
+    (host === 'darwin' && fingerprint.targetOs === 'mac') ||
+    (host === 'win32' && fingerprint.targetOs === 'windows') ||
+    (host === 'linux' && fingerprint.targetOs === 'linux')
+  let webglVendor = hostMatchesTarget ? fingerprint.webglVendor : ''
+  let webglRenderer = hostMatchesTarget ? fingerprint.webglRenderer : ''
+  // 兜底:旧 profile 可能存了裸格式 renderer(早期 macRenderers 数组里有 'Apple Inc.'/'Apple M2'
+  // 这种不带 ANGLE 包装的条目)。真实 Chrome 不论平台 UNMASKED_RENDERER 都是 ANGLE 包装,
+  // 不含 ANGLE 的字符串一定假。任一字段不达标就整体清空 —— 让真实 GPU 信息透出比硬撑被识破强。
+  // 用户想要好的伪造,UI 上重新摇一次 fingerprint 即可拿到 ANGLE 格式条目。
+  if (webglRenderer && !webglRenderer.includes('ANGLE')) {
+    webglVendor = ''
+    webglRenderer = ''
+  }
+  if (webglVendor && !webglVendor.startsWith('Google Inc.') && !webglVendor.startsWith('Google ')) {
+    webglVendor = ''
+    webglRenderer = ''
+  }
   return {
     schemaVersion: 1,
     targetOs: fingerprint.targetOs,
@@ -154,8 +189,8 @@ export function fingerprintPayload(fingerprint: FingerprintConfig) {
     hardwareConcurrency: fingerprint.hardwareConcurrency || 8,
     deviceMemory: fingerprint.deviceMemory || 8,
     timezone: fingerprint.timezone,
-    webglVendor: fingerprint.webglVendor,
-    webglRenderer: fingerprint.webglRenderer,
+    webglVendor,
+    webglRenderer,
     canvasNoise: fingerprint.canvasNoise,
     audioNoise: fingerprint.audioNoise,
     viewport: fingerprint.viewport,
@@ -179,8 +214,8 @@ export function fingerprintPayload(fingerprint: FingerprintConfig) {
       timezone: fingerprint.timezone
     },
     webgl: {
-      vendor: fingerprint.webglVendor,
-      renderer: fingerprint.webglRenderer
+      vendor: webglVendor,
+      renderer: webglRenderer
     },
     noise: {
       canvas: fingerprint.canvasNoise,
@@ -303,9 +338,35 @@ const LEGACY_INJECT = `
 })();
 `
 
+/**
+ * 把传入 UA 字符串里的 `Chrome/<x.x.x.x>` 段替换成真实安装的内核版本。
+ *
+ * 痛点:profile.fingerprint.userAgent 是 profile 创建那一刻随机生成的,但实际跑的
+ * Chromium 二进制版本是另一回事 —— 用户随时可能更新内核。两者一旦不一致,Cloudflare
+ * 会拿 UA vs `navigator.userAgentData.brands` / `sec-ch-ua` 做交叉校验直接判 bot;
+ * 即便交叉校验没触发,Turnstile compat 检查也会直接读 UA 字符串里的 Chrome 版本号决定
+ * "supported / unsupported"。
+ *
+ * 策略:启动时把 selection.version(从已安装 kernel 探测出的真实版本)切进 UA。
+ * kernel 没安装或版本号格式异常时静默回退到原 UA。
+ */
+export function alignUserAgentWithKernel(userAgent: string, kernelVersion: string | undefined): string {
+  if (!kernelVersion) return userAgent
+  // 真实版本至少要形如 a.b.c.d(Chrome for Testing 用满四段)。Chromium 老快照号
+  // (纯数字 build id)和 cloak 自定义版本号不在此覆盖,免得改坏。
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(kernelVersion)) return userAgent
+  return userAgent.replace(/Chrome\/[\d.]+/, `Chrome/${kernelVersion}`)
+}
+
 export function ensureFingerprintExtension(profile: BrowserProfile, mode: FingerprintInjectMode = 'stealth') {
   const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')
   fs.mkdirSync(extensionPath, { recursive: true })
+
+  // MV3 content_scripts.world="MAIN" (Chrome 111+) 让脚本直接在页面主世界跑,
+  // 不再需要"isolated content.js → <script src=inject.js> → 主世界"的异步中转。
+  // 关键收益:patch 与页面其它 inline <script> 在同一个事件循环 tick 内被 Chromium
+  // 排队,Cloudflare/Turnstile 的 challenge.js 来不及拍 navigator/window.chrome 的
+  // 原始快照——之前的实现里 inject.js 是 async resource,challenge 脚本经常先跑完。
   const manifest = {
     manifest_version: 3,
     name: 'Auto Registry Fingerprint',
@@ -316,36 +377,43 @@ export function ensureFingerprintExtension(profile: BrowserProfile, mode: Finger
         matches: ['<all_urls>'],
         js: ['content.js'],
         run_at: 'document_start',
-        all_frames: true
-      }
-    ],
-    web_accessible_resources: [
-      {
-        resources: ['inject.js'],
-        matches: ['<all_urls>']
+        all_frames: true,
+        world: 'MAIN'
       }
     ]
   }
-
-  const config = JSON.stringify(fingerprintPayload(profile.fingerprint))
-  const content = `
-const configTag = document.createElement('script');
-configTag.id = 'auto-registry-fingerprint-config';
-configTag.type = 'application/json';
-configTag.textContent = ${JSON.stringify(config)};
-(document.documentElement || document.head).appendChild(configTag);
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('inject.js');
-script.onload = () => script.remove();
-(document.documentElement || document.head).appendChild(script);
-`
 
   // mode='stealth' 走完整 patch 套件(含 nativeToString 伪装、webdriver/chrome/iframe/permissions 等)
   // mode='extension' 走老的 LEGACY_INJECT,留作快速回滚通道
   const inject = mode === 'stealth' ? buildStealthInjectScript(togglesFromEnv()) : LEGACY_INJECT
 
+  // 注入脚本期望 `payload` 在词法作用域里(原来从 DOM 节点 JSON.parse 而来)。
+  // world=MAIN 后已经在主世界,直接把 payload 内联成字面量 + 复用同一段 IIFE 即可。
+  // 注:buildStealthInjectScript 和 LEGACY_INJECT 都自己读 'auto-registry-fingerprint-config'
+  // 节点,我们这里在它们之前先把 payload 挂上,并放一个 stub 节点喂给它们,这样两套 inject
+  // 都不用动。
+  const payloadLiteral = JSON.stringify(fingerprintPayload(profile.fingerprint))
+  const content = `(() => {
+  try {
+    const payload = ${payloadLiteral};
+    // 兼容 buildStealthInjectScript / LEGACY_INJECT 里"读 DOM 配置节点"的协议:
+    // 创建一个临时节点供 inject 读取,inject 内部会自己 remove。
+    const root = document.documentElement || document.head || document.body;
+    if (root) {
+      const configTag = document.createElement('script');
+      configTag.id = 'auto-registry-fingerprint-config';
+      configTag.type = 'application/json';
+      configTag.textContent = JSON.stringify(payload);
+      root.appendChild(configTag);
+    }
+  } catch (e) {}
+})();
+${inject}`
+
   fs.writeFileSync(path.join(extensionPath, 'manifest.json'), JSON.stringify(manifest, null, 2))
   fs.writeFileSync(path.join(extensionPath, 'content.js'), content)
-  fs.writeFileSync(path.join(extensionPath, 'inject.js'), inject)
+  // 旧的 inject.js 资源不再需要;若上次安装留下来了清理掉,免得旧文件让人误以为还走老路径。
+  const legacyInjectPath = path.join(extensionPath, 'inject.js')
+  try { fs.rmSync(legacyInjectPath, { force: true }) } catch {}
   return extensionPath
 }
