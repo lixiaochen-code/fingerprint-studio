@@ -7,24 +7,21 @@ import { KeepAlive } from '@/components/keep-alive'
 import { KernelSetup } from '@/components/kernel-setup'
 import { ProfileDetailsDialog } from '@/components/profile-details-dialog'
 import { ProfileFormDialog } from '@/components/profile-form-dialog'
+import { useAppData } from '@/hooks/useAppData'
+import { useLocale } from '@/hooks/useLocale'
+import { useTheme } from '@/hooks/useTheme'
 import { interpolate } from '@/lib/i18n'
-import type { Locale, ThemePref } from '@/lib/locale'
 import { translations } from '@/lib/translations'
 import { ProfilesView } from '@/views/profiles'
 import { ProxiesView } from '@/views/proxies'
 import { ScriptsView } from '@/views/scripts'
 import { SettingsView } from '@/views/settings'
 import type {
-  BrowserPlugin,
   BrowserProfile,
   KernelType,
   ProfileDraft,
-  Proxy,
   ProxyDraft,
-  RuntimeInfo,
-  Script,
-  ScriptDraft,
-  ScriptRun
+  ScriptDraft
 } from '../electron/types'
 import './styles.css'
 
@@ -41,23 +38,6 @@ function viewFromPath(pathname: string): AppView {
   return (ALL_VIEWS as readonly string[]).includes(segment) ? (segment as AppView) : DEFAULT_VIEW
 }
 
-function initialLocale(): Locale {
-  const stored = window.localStorage.getItem('auto-registry-locale')
-  if (stored === 'en' || stored === 'zh') return stored
-  return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
-}
-
-function initialTheme(): ThemePref {
-  const stored = window.localStorage.getItem('auto-registry-theme')
-  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-  return 'system'
-}
-
-function resolveTheme(pref: ThemePref): 'light' | 'dark' {
-  if (pref !== 'system') return pref
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
 type FormDialogState =
   | { open: false }
   | { open: true; mode: 'create'; profile?: undefined }
@@ -67,115 +47,28 @@ type FormDialogState =
  * 应用根组件 —— 顶层数据编排 + 路由分发。
  *
  * 设计:
- * - 业务状态(profiles/plugins/proxies/scripts/activeRuns)集中在这里 useState 持有;
- *   不抽 hook 是为了让每个 setState 与 IPC 通讯都在同一文件可见,排错只需读 App.tsx
- * - 子视图(ProfilesView/ScriptsView/...)纯展示 + 回调,不直接调 IPC
+ * - 数据加载 / 订阅 / 轮询 抽到 `useAppData`(保持本文件不被副作用噪音淹没)
+ * - 主题 / 语言 抽到 `useTheme` / `useLocale`
+ * - 业务函数(launch / stop / submitProfile / ...)留在本文件,因为它们都需要在
+ *   IPC 完成后调用 `reload()` 同步状态;放进 hook 反而要绕一层
  * - 路由真源:react-router 的 location;view 是派生 memo,setView 走 navigate
  */
 export function App() {
-  const [profiles, setProfiles] = useState<BrowserProfile[]>([])
-  const [plugins, setPlugins] = useState<BrowserPlugin[]>([])
-  const [proxies, setProxies] = useState<Proxy[]>([])
-  const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
-  const [query, setQuery] = useState('')
-  const [busyId, setBusyId] = useState<string>()
-  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo>()
-  const [locale, setLocale] = useState<Locale>(initialLocale)
-
-  const location = useLocation()
-  const navigate = useNavigate()
-  const view = useMemo(() => viewFromPath(location.pathname), [location.pathname])
-  const setView = useMemo(
-    () => (next: AppView) => {
-      if (next === view) return
-      navigate(`/${next}`)
-    },
-    [navigate, view]
-  )
-
-  const [formDialog, setFormDialog] = useState<FormDialogState>({ open: false })
-  const [detailsIds, setDetailsIds] = useState<string[]>([])
-  const [deleteIds, setDeleteIds] = useState<string[]>([])
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [setupKernel, setSetupKernel] = useState<KernelType>()
-  const [themePref, setThemePref] = useState<ThemePref>(initialTheme)
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() =>
-    resolveTheme(initialTheme())
-  )
-  const [scripts, setScripts] = useState<Script[]>([])
-  const [selectedScriptId, setSelectedScriptId] = useState<string>()
-  // 全局活跃 run 集合(主进程在 start / handleExit 时广播 'active-changed';启动时主动拉一次兜底)。
-  // Header 抽屉 / Environments 列表 SCRIPTING 徽章 / Scripts 面板 chip 灰显都从这里派生。
-  // 这里**不**保存日志 —— 日志由 ScriptRunPanel 自己分脚本维护。
-  const [activeRuns, setActiveRuns] = useState<ScriptRun[]>([])
+  const { themePref, resolvedTheme, setThemePref } = useTheme()
+  const { locale, setLocale, toggleLocale } = useLocale()
   const t = translations[locale]
 
-  // 应用启动时如果 hash 路径不是合法的 view(常见于"#/"或空 hash),把它规整到默认页。
-  // 之后用户的导航全部通过 navigate(),URL 与 view 保持双向同步。
-  useEffect(() => {
-    if (location.pathname === '' || location.pathname === '/') {
-      navigate(`/${DEFAULT_VIEW}`, { replace: true })
-    }
-    // 仅启动时跑一次:依赖故意只放空数组,后续 location 变化由 view 派生 memo 处理。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    const apply = () => setResolvedTheme(resolveTheme(themePref))
-    apply()
-    window.localStorage.setItem('auto-registry-theme', themePref)
-    if (themePref === 'system') {
-      const mql = window.matchMedia('(prefers-color-scheme: dark)')
-      mql.addEventListener('change', apply)
-      return () => mql.removeEventListener('change', apply)
-    }
-  }, [themePref])
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = resolvedTheme
-  }, [resolvedTheme])
-
-  async function load() {
-    const [nextProfiles, nextPlugins, statuses, nextRuntimeInfo, nextScripts, nextProxies] =
-      await Promise.all([
-        window.registry.profiles.list(),
-        window.registry.plugins.list(),
-        window.registry.profiles.status(),
-        window.registry.runtime.info(),
-        window.registry.scripts.list(),
-        window.registry.proxies.list()
-      ])
-    setProfiles(nextProfiles)
-    setPlugins(nextPlugins)
-    setProxies(nextProxies)
-    setRunningIds(
-      new Set(
-        statuses
-          .filter((status) => status.running)
-          .map((status) => status.profileId)
-      )
-    )
-    setRuntimeInfo(nextRuntimeInfo)
-    setScripts(nextScripts)
-    setSelectedIds((prev) => {
-      const next = new Set<string>()
-      for (const id of prev) {
-        if (nextProfiles.some((profile) => profile.id === id)) next.add(id)
-      }
-      return next
-    })
-  }
-
-  useEffect(() => {
-    void load()
-    const timer = window.setInterval(() => void load(), 3000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  // 主进程在浏览器异常退出时广播 'profiles:crashed';前台 toast 给用户看,
-  // 不至于盯着没动静的 UI 一脸懵。
-  useEffect(() => {
-    const unsubscribe = window.registry.profiles.onCrashed((event) => {
+  const {
+    profiles,
+    plugins,
+    proxies,
+    scripts,
+    runningIds,
+    runtimeInfo,
+    activeRuns,
+    reload
+  } = useAppData({
+    onBrowserCrashed: (event) => {
       const profile = profiles.find((item) => item.id === event.profileId)
       const name = profile?.name || event.profileId
       const code = event.exitCode ?? 'n/a'
@@ -194,32 +87,51 @@ export function App() {
           </div>
         )
       })
-      void load()
-    })
-    return () => unsubscribe()
-  }, [profiles, t])
-
-  // 订阅活跃 run 集合;启动时拉一次兜底(错过初始事件不会有空状态错觉)。
-  useEffect(() => {
-    let cancelled = false
-    void window.registry.scripts.activeRuns().then((initial) => {
-      if (!cancelled) setActiveRuns(initial)
-    })
-    const unsubscribe = window.registry.scripts.onEvent((event) => {
-      if (event.type === 'active-changed') {
-        setActiveRuns(event.active)
-      }
-    })
-    return () => {
-      cancelled = true
-      unsubscribe()
     }
+  })
+
+  const location = useLocation()
+  const navigate = useNavigate()
+  const view = useMemo(() => viewFromPath(location.pathname), [location.pathname])
+  const setView = useMemo(
+    () => (next: AppView) => {
+      if (next === view) return
+      navigate(`/${next}`)
+    },
+    [navigate, view]
+  )
+
+  const [query, setQuery] = useState('')
+  const [busyId, setBusyId] = useState<string>()
+  const [formDialog, setFormDialog] = useState<FormDialogState>({ open: false })
+  const [detailsIds, setDetailsIds] = useState<string[]>([])
+  const [deleteIds, setDeleteIds] = useState<string[]>([])
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [setupKernel, setSetupKernel] = useState<KernelType>()
+  const [selectedScriptId, setSelectedScriptId] = useState<string>()
+
+  // 应用启动时如果 hash 路径不是合法的 view(常见于"#/"或空 hash),把它规整到默认页。
+  // 之后用户的导航全部通过 navigate(),URL 与 view 保持双向同步。
+  useEffect(() => {
+    if (location.pathname === '' || location.pathname === '/') {
+      navigate(`/${DEFAULT_VIEW}`, { replace: true })
+    }
+    // 仅启动时跑一次:依赖故意只放空数组,后续 location 变化由 view 派生 memo 处理。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // selectedIds 在 profiles 列表收缩时清掉已不存在的项,避免幽灵选区
   useEffect(() => {
-    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
-    window.localStorage.setItem('auto-registry-locale', locale)
-  }, [locale])
+    setSelectedIds((prev) => {
+      let changed = false
+      const next = new Set<string>()
+      for (const id of prev) {
+        if (profiles.some((profile) => profile.id === id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [profiles])
 
   // 内核未装时第一次拿到 runtimeInfo 自动弹 KernelSetup;之后用户主动关掉也不再骚扰。
   useEffect(() => {
@@ -287,7 +199,7 @@ export function App() {
           )
         }
       }
-      await load()
+      await reload()
     } catch (error) {
       console.error(error)
     } finally {
@@ -299,7 +211,7 @@ export function App() {
     setBusyId(profile.id)
     try {
       await window.registry.profiles.stop(profile.id)
-      await load()
+      await reload()
     } catch (error) {
       console.error(error)
     } finally {
@@ -310,7 +222,7 @@ export function App() {
   async function submitProfile(draft: ProfileDraft) {
     await window.registry.profiles.save(draft)
     setFormDialog({ open: false })
-    await load()
+    await reload()
   }
 
   async function importPluginFromForm() {
@@ -321,7 +233,7 @@ export function App() {
       } else {
         toast(t.importCanceled)
       }
-      await load()
+      await reload()
       return plugin
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -334,7 +246,7 @@ export function App() {
     try {
       const copy = await window.registry.profiles.duplicate(profile.id)
       toast.success(interpolate(t.duplicateSuccess, { name: copy.name }))
-      await load()
+      await reload()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       toast.error(interpolate(t.actionFailed, { action: t.duplicate, message }))
@@ -350,28 +262,24 @@ export function App() {
       return next
     })
     toast.success(interpolate(t.deleteSuccess, { count: String(ids.length) }))
-    await load()
+    await reload()
   }
 
   async function setActiveVersion(pluginId: string, versionId: string) {
     await window.registry.plugins.setActiveVersion(pluginId, versionId)
-    await load()
+    await reload()
   }
 
   async function deletePlugin(pluginId: string) {
     await window.registry.plugins.remove(pluginId)
-    await load()
+    await reload()
   }
 
   async function createScript(draft: ScriptDraft) {
     try {
       const created = await window.registry.scripts.save(draft)
-      toast.success(
-        interpolate(locale === 'zh' ? '脚本已保存:{{name}}' : 'Script saved: {{name}}', {
-          name: created.name
-        })
-      )
-      await load()
+      toast.success(interpolate(t.scriptSavedToast, { name: created.name }))
+      await reload()
       return created
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -383,8 +291,8 @@ export function App() {
   async function removeScript(scriptId: string) {
     try {
       await window.registry.scripts.remove(scriptId)
-      toast.success(locale === 'zh' ? '脚本已删除' : 'Script removed')
-      await load()
+      toast.success(t.scriptRemovedToast)
+      await reload()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       toast.error(interpolate(t.actionFailed, { action: 'SCRIPT', message }))
@@ -403,7 +311,7 @@ export function App() {
         themePref={themePref}
         onThemeChange={setThemePref}
         onNavigate={setView}
-        onLocaleToggle={() => setLocale((current) => (current === 'en' ? 'zh' : 'en'))}
+        onLocaleToggle={toggleLocale}
         currentView={view}
         activeRuns={activeRuns}
         scripts={scripts}
@@ -427,7 +335,7 @@ export function App() {
           runtimeInfo={runtimeInfo}
           query={query}
           onQueryChange={setQuery}
-          onReload={() => void load()}
+          onReload={() => void reload()}
           filtered={filtered}
           proxies={proxies}
           runningIds={runningIds}
@@ -474,7 +382,7 @@ export function App() {
       <KeepAlive visible={view === 'proxies'}>
         <ProxiesView
           proxies={proxies}
-          onReload={load}
+          onReload={reload}
           locale={locale}
           onToast={(message, kind) =>
             kind === 'error' ? toast.error(message) : toast.success(message)
@@ -515,7 +423,7 @@ export function App() {
           // 嵌套"+ 新增代理"流:由 ProfileFormDialog 通过 ProxyFormDialog 触发。
           // 我们持久化后立刻 reload 全局 proxies,然后把刚建的 Proxy 返回给对话框自动选中。
           const created = await window.registry.proxies.save(draft)
-          await load()
+          await reload()
           return created
         }}
       />
@@ -547,7 +455,7 @@ export function App() {
         hostSupportsItbrowser={runtimeInfo?.itbrowserSupported || false}
         hostSupportsCloak={runtimeInfo?.cloakSupported || false}
         onClose={() => setSetupKernel(undefined)}
-        onInstalled={() => void load()}
+        onInstalled={() => void reload()}
       />
 
       <Toaster

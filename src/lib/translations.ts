@@ -57,6 +57,8 @@ export type Translations = {
   fingerprintModeHint: string
   browserCrashedTitle: string
   browserCrashedDetails: string
+  scriptSavedToast: string
+  scriptRemovedToast: string
 }
 
 export const translations: Record<Locale, Translations> = {
@@ -110,7 +112,9 @@ export const translations: Record<Locale, Translations> = {
     themeSystem: 'System',
     fingerprintModeHint: 'How browser fingerprint is being spoofed for every profile.',
     browserCrashedTitle: 'Browser exited unexpectedly: {{name}}',
-    browserCrashedDetails: 'Exit code {{code}}{{signal}}. Check the log for details.'
+    browserCrashedDetails: 'Exit code {{code}}{{signal}}. Check the log for details.',
+    scriptSavedToast: 'Script saved: {{name}}',
+    scriptRemovedToast: 'Script removed.'
   },
   zh: {
     appName: '环境管理器',
@@ -162,6 +166,8 @@ export const translations: Record<Locale, Translations> = {
     themeSystem: '跟随系统',
     fingerprintModeHint: '当前为每个环境改写浏览器指纹的方式。',
     browserCrashedTitle: '浏览器异常退出：{{name}}',
-    browserCrashedDetails: '退出码 {{code}}{{signal}}。可在日志中查看详情。'
+    browserCrashedDetails: '退出码 {{code}}{{signal}}。可在日志中查看详情。',
+    scriptSavedToast: '脚本已保存：{{name}}',
+    scriptRemovedToast: '脚本已删除。'
   }
 }
