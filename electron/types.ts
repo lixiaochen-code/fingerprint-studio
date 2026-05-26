@@ -168,11 +168,21 @@ export type BrowserPlugin = {
  */
 export type ScriptSource = 'local' | 'external'
 
+/**
+ * 脚本作用域:
+ * - profile (默认): 老脚本,绑定到一个 profile 运行,SDK 暴露 page/browser/profile/...
+ * - global: 不绑 profile 的调度脚本,SDK 暴露 profiles.* / runScript;**没有** page/browser
+ *
+ * 加载历史 script-meta.json 时缺这个字段就补 'profile'(向后兼容)。
+ */
+export type ScriptScope = 'profile' | 'global'
+
 export type Script = {
   id: string
   name: string
   description?: string
   source: ScriptSource
+  scope: ScriptScope
   /** 绝对路径；local 脚本指向应用数据目录内，external 脚本指向外部任意目录 */
   entryPath: string
   createdAt: string
@@ -186,9 +196,21 @@ export type ScriptRunStatus =
   | 'failed'
   | 'stopped'
 
+/**
+ * 触发源:
+ * - manual: 用户在 UI 上点 Run
+ * - global-script: 由全局脚本通过 runScript() 触发
+ * - on-create: profile 创建时跑的 onCreateQueue
+ * - on-launch: profile 启动后跑的 onLaunchQueue
+ *
+ * 加载历史 script-runs.json 缺这个字段时补 'manual'。
+ */
+export type ScriptTriggeredBy = 'manual' | 'global-script' | 'on-create' | 'on-launch'
+
 export type ScriptRun = {
   id: string
   scriptId: string
+  /** 绑定 profile 的 run 必填;全局脚本 run 留空字符串 */
   profileId: string
   status: ScriptRunStatus
   startedAt: string
@@ -198,6 +220,12 @@ export type ScriptRun = {
   error?: string
   /** 绝对路径，runtime 会把 stdout/stderr 追加到这里 */
   logPath: string
+  /** 触发源,缺省补 'manual'(老数据兼容) */
+  triggeredBy: ScriptTriggeredBy
+  /** 由全局脚本 runScript 触发时,指向触发它的全局 run id */
+  parentRunId?: string
+  /** 调度方传入的参数;仅历史回放用,不影响重跑 */
+  params?: Record<string, unknown>
 }
 
 export type ScriptDraft = {
@@ -205,6 +233,8 @@ export type ScriptDraft = {
   name: string
   description?: string
   source: ScriptSource
+  /** 默认 'profile';创建对话框未来可让用户选 'global' */
+  scope?: ScriptScope
   /** 仅 external 必填；local 会由 store 自动生成 */
   entryPath?: string
   /** 仅 local 新建时有意义：初始源码，会写入 index.ts */

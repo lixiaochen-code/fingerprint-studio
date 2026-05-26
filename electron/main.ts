@@ -561,12 +561,30 @@ app.whenReady().then(async () => {
   ipcMain.handle('scripts:run', async (_event, scriptId: string, profileId: string) => {
     const script = scriptStore.get(scriptId)
     if (!script) throw new Error(`Script not found: ${scriptId}`)
-    const profile = store.get(profileId)
-    if (!profile) throw new Error(`Profile not found: ${profileId}`)
 
     try {
+      // global-scope 脚本不需要 profile,profileId 参数被忽略;profile-scope 走原路径。
+      // 渲染层的 ScriptRunPanel 会根据 script.scope 决定是否传 profileId,但即便错传
+      // 这里也安全 —— 后端不依赖那个值。
+      if (script.scope === 'global') {
+        const run = await scriptRuntime.start({
+          script,
+          profile: null,
+          webSocketDebuggerUrl: null,
+          triggeredBy: 'manual'
+        })
+        return { ok: true as const, run }
+      }
+
+      const profile = store.get(profileId)
+      if (!profile) throw new Error(`Profile not found: ${profileId}`)
       const webSocketDebuggerUrl = await ensureProfileRunningForScript(profile)
-      const run = await scriptRuntime.start({ script, profile, webSocketDebuggerUrl })
+      const run = await scriptRuntime.start({
+        script,
+        profile,
+        webSocketDebuggerUrl,
+        triggeredBy: 'manual'
+      })
       return { ok: true as const, run }
     } catch (error) {
       return { ok: false as const, error: serializeError(error) }

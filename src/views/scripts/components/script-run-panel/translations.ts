@@ -33,6 +33,8 @@ export type Translations = {
   proxyNone: string
   selectionSummary: string
   selectionEmpty: string
+  /** 全局脚本面板提示行(无 profile 选择时展示) */
+  globalRunHint: string
 }
 
 export const labels: Record<Locale, Translations> = {
@@ -62,7 +64,8 @@ export const labels: Record<Locale, Translations> = {
     filterAll: 'All',
     proxyNone: 'No proxy',
     selectionSummary: '{{count}} selected',
-    selectionEmpty: 'None selected'
+    selectionEmpty: 'None selected',
+    globalRunHint: 'Global scripts run without an environment. Click Run to execute.'
   },
   zh: {
     panelTitle: '运行',
@@ -88,6 +91,7 @@ export const labels: Record<Locale, Translations> = {
     filterAll: '全部',
     proxyNone: '无代理',
     selectionSummary: '已选 {{count}} 个',
-    selectionEmpty: '未选择'
+    selectionEmpty: '未选择',
+    globalRunHint: '全局脚本不绑环境,点击"运行"直接执行。'
   }
 }

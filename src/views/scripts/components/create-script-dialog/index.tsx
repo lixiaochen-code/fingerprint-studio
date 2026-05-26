@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import type { ScriptDraft, ScriptSource } from '../../../../../electron/types'
+import { cn } from '@/lib/utils'
+import type { ScriptDraft, ScriptScope, ScriptSource } from '../../../../../electron/types'
 import type { Translations } from '../../translations'
 
 export interface CreateScriptDialogProps {
@@ -14,8 +15,12 @@ export interface CreateScriptDialogProps {
 }
 
 /**
- * 新建脚本对话框。`source = 'local'` 时只需要 name + 可选描述;
+ * 新建脚本对话框。`source = 'local'` 时只需要 name + 可选描述 + scope;
  * `source = 'external'` 时还要选 entryPath(支持系统文件选择器)。
+ *
+ * scope 选择直接放在表单顶部:profile / global 二选一。默认 profile,因为绝大多数脚本
+ * 都是绑环境的;global 是给写调度器的高级用户。两种模板源码不同,首次新建时根据
+ * scope 写入对应的 boilerplate(由主进程的 ScriptStore 选)。
  */
 export function CreateScriptDialog({
   open,
@@ -27,6 +32,7 @@ export function CreateScriptDialog({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [entryPath, setEntryPath] = useState('')
+  const [scope, setScope] = useState<ScriptScope>('profile')
   const [error, setError] = useState<string | undefined>()
   const [submitting, setSubmitting] = useState(false)
 
@@ -35,6 +41,7 @@ export function CreateScriptDialog({
     setName('')
     setDescription('')
     setEntryPath('')
+    setScope('profile')
     setError(undefined)
     setSubmitting(false)
   }, [open, source])
@@ -54,6 +61,7 @@ export function CreateScriptDialog({
         name: name.trim(),
         description: description.trim() || undefined,
         source,
+        scope,
         entryPath: source === 'external' ? entryPath.trim() : undefined
       })
     } catch (caught) {
@@ -61,7 +69,7 @@ export function CreateScriptDialog({
     } finally {
       setSubmitting(false)
     }
-  }, [name, description, entryPath, source, onSubmit, t])
+  }, [name, description, entryPath, scope, source, onSubmit, t])
 
   return (
     <Dialog
@@ -81,6 +89,22 @@ export function CreateScriptDialog({
       }
     >
       <div className="space-y-4">
+        <Field label={t.scopeLabel}>
+          <div className="grid grid-cols-2 gap-2">
+            <ScopeOption
+              checked={scope === 'profile'}
+              label={t.scopeProfile}
+              hint={t.scopeProfileHint}
+              onSelect={() => setScope('profile')}
+            />
+            <ScopeOption
+              checked={scope === 'global'}
+              label={t.scopeGlobal}
+              hint={t.scopeGlobalHint}
+              onSelect={() => setScope('global')}
+            />
+          </div>
+        </Field>
         <Field label={t.name}>
           <Input
             value={name}
@@ -118,6 +142,36 @@ export function CreateScriptDialog({
         {error && <p className="text-[11px] text-destructive">{error}</p>}
       </div>
     </Dialog>
+  )
+}
+
+function ScopeOption({
+  checked,
+  label,
+  hint,
+  onSelect
+}: {
+  checked: boolean
+  label: string
+  hint: string
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        'flex flex-col gap-1 border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        checked
+          ? 'border-primary bg-primary/10'
+          : 'border-border bg-background hover:bg-muted/30'
+      )}
+    >
+      <span className={cn('text-xs font-bold tracking-tight', checked && 'text-primary')}>
+        {label}
+      </span>
+      <span className="text-[10px] leading-snug text-muted-foreground">{hint}</span>
+    </button>
   )
 }
 

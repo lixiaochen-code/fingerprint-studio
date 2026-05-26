@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fork, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import type { BrowserProfile, Script, ScriptRun, ScriptRunStatus } from '../types'
+import type { BrowserProfile, Script, ScriptRun, ScriptRunStatus, ScriptTriggeredBy } from '../types'
 import type { ScriptStore } from './store'
 import { scriptsRoot } from '../paths'
 
@@ -120,24 +120,49 @@ export class ScriptRuntimeManager extends EventEmitter {
 
   async start(options: {
     script: Script
-    profile: BrowserProfile
-    webSocketDebuggerUrl: string
+    /**
+     * profile-scope 脚本必传;global-scope 脚本传 null。
+     * 互斥规则只对 profile-scope 生效 —— 全局脚本不绑 profile,不会触发 PROFILE_BUSY。
+     */
+    profile: BrowserProfile | null
+    /**
+     * profile-scope 脚本必传(从 ensureProfileRunningForScript 拿到);
+     * global-scope 脚本传 null,SDK 不会去连浏览器。
+     */
+    webSocketDebuggerUrl: string | null
+    /** 触发源,默认 'manual' */
+    triggeredBy?: ScriptTriggeredBy
+    /** 由全局脚本 runScript 触发时,父 run id */
+    parentRunId?: string
+    /** 调度方传给 main(args) 的 params,默认 {} */
+    params?: Record<string, unknown>
   }): Promise<ScriptRun> {
-    const { script, profile, webSocketDebuggerUrl } = options
+    const { script, profile, webSocketDebuggerUrl, triggeredBy = 'manual', parentRunId, params } = options
 
-    // 互斥规则：一个 profile 同一时刻只允许 1 个活跃 ScriptRun。
-    // 提前在这里拦下，runtime 永远不会进入"两个 run 同时持有同一 profile"的状态。
-    const occupiedBy = this.getActiveByProfile(profile.id)
-    if (occupiedBy) {
-      throw new ProfileBusyError(profile.id, {
-        runId: occupiedBy.id,
-        scriptId: occupiedBy.scriptId
-      })
+    // global-scope 脚本不绑 profile,跳过互斥;profile-scope 走原有规则。
+    if (script.scope !== 'global') {
+      if (!profile || !webSocketDebuggerUrl) {
+        throw new Error('profile-scope script requires profile + webSocketDebuggerUrl')
+      }
+      // 互斥规则:一个 profile 同一时刻只允许 1 个活跃 ScriptRun。
+      // 提前在这里拦下,runtime 永远不会进入"两个 run 同时持有同一 profile"的状态。
+      const occupiedBy = this.getActiveByProfile(profile.id)
+      if (occupiedBy) {
+        throw new ProfileBusyError(profile.id, {
+          runId: occupiedBy.id,
+          scriptId: occupiedBy.scriptId
+        })
+      }
     }
 
-    const run = this.store.createRun(script.id, profile.id)
+    const profileIdForRun = profile?.id ?? ''
+    const run = this.store.createRun(script.id, profileIdForRun, {
+      triggeredBy,
+      parentRunId,
+      params
+    })
 
-    // 工作目录：local 脚本用自身目录；external 脚本用 <scriptsRoot>/external-states/<scriptId>
+    // 工作目录:local 脚本用自身目录;external 脚本用 <scriptsRoot>/external-states/<scriptId>
     // 避免往用户自己的项目目录里写 state.json / .compiled
     const workingDir = script.source === 'local'
       ? path.dirname(script.entryPath)
@@ -151,6 +176,7 @@ export class ScriptRuntimeManager extends EventEmitter {
     const bootstrapPath = resolveBootstrapPath()
 
     const contextEnv = JSON.stringify({
+      scope: script.scope,
       profile,
       webSocketDebuggerUrl,
       workingDir,

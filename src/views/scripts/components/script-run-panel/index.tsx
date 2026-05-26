@@ -196,7 +196,8 @@ export function ScriptRunPanel({
                 startedAt: new Date().toISOString(),
                 endedAt: new Date().toISOString(),
                 error: friendlyMessage,
-                logPath: ''
+                logPath: '',
+                triggeredBy: 'manual'
               },
               logs: [
                 {
@@ -216,9 +217,61 @@ export function ScriptRunPanel({
     }
   }, [script.id, selectedProfileIds, profileById, scriptNameById, t])
 
-  // ref 跟踪 runSelected 最新版,让全局 keydown 监听器读到最新闭包
-  const runSelectedRef = useRef(runSelected)
-  runSelectedRef.current = runSelected
+  /**
+   * 全局脚本走的 run 入口:不绑 profile,profileId 传空串。后端按 scope 分发。
+   * profileLabel 在 UI 上用脚本名占位(全局 run 没 profile 概念)。
+   */
+  const runGlobal = useCallback(async () => {
+    if (script.scope !== 'global') return
+    setBusy(true)
+    try {
+      const result = await window.registry.scripts.run(script.id, '')
+      setLiveRuns((prev) => {
+        if (result.ok) {
+          return [
+            ...prev,
+            {
+              run: result.run,
+              logs: [],
+              profileLabel: script.name
+            }
+          ]
+        }
+        const fakeId = `failed_${Date.now().toString(36)}`
+        const friendlyMessage = interpolate(t.startFailed, { message: result.error.message })
+        return [
+          ...prev,
+          {
+            run: {
+              id: fakeId,
+              scriptId: script.id,
+              profileId: '',
+              status: 'failed',
+              startedAt: new Date().toISOString(),
+              endedAt: new Date().toISOString(),
+              error: friendlyMessage,
+              logPath: '',
+              triggeredBy: 'manual'
+            },
+            logs: [
+              {
+                level: 'error',
+                line: friendlyMessage,
+                at: new Date().toISOString()
+              }
+            ],
+            profileLabel: script.name
+          }
+        ]
+      })
+    } finally {
+      setBusy(false)
+    }
+  }, [script.id, script.scope, script.name, t])
+
+  // ref 跟踪最新的 run 入口闭包,让全局 keydown 监听器读到最新版本
+  const runHandlerRef = useRef<() => Promise<void>>(async () => {})
+  runHandlerRef.current = script.scope === 'global' ? runGlobal : runSelected
 
   // Cmd/Ctrl + Enter 触发 Run(仅在面板挂载期间生效;切走脚本会卸载并清理监听)
   useEffect(() => {
@@ -229,7 +282,7 @@ export function ScriptRunPanel({
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       event.preventDefault()
-      void runSelectedRef.current()
+      void runHandlerRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -268,8 +321,8 @@ export function ScriptRunPanel({
               ? `${visibleRuns.filter((r) => !isFinished(r.run.status)).length} / ${visibleRuns.length}`
               : ''}
           </span>
-          {/* 选区摘要:profile chip 多到挤的时候,header 这里仍能一眼看到"选了几个" */}
-          {profiles.length > 0 && (
+          {/* 选区摘要仅 profile-scope 显示;global 没有 profile 选择,这里不出 */}
+          {script.scope !== 'global' && profiles.length > 0 && (
             <span className="font-mono text-[10px] text-muted-foreground">
               {selectedProfileIds.size > 0
                 ? interpolate(t.selectionSummary, { count: String(selectedProfileIds.size) })
@@ -303,13 +356,21 @@ export function ScriptRunPanel({
           {/*
             Run 按钮提到 header 右上,固定位置不会被 chip 流推走,也避免在 ProfileSelector
             内挤到第二行被忽略。Cmd/Ctrl+Enter 仍可用。
+            global-scope:无 profile 选择,只要不 busy 即可触发;profile-scope:必须勾了 profile。
           */}
           <Tooltip side="bottom" content={t.runHint}>
             <Button
               size="sm"
               className="h-7 px-3 text-[10px]"
-              disabled={busy || selectedProfileIds.size === 0 || profiles.length === 0}
-              onClick={() => void runSelected()}
+              disabled={
+                busy ||
+                (script.scope === 'global'
+                  ? false
+                  : selectedProfileIds.size === 0 || profiles.length === 0)
+              }
+              onClick={() =>
+                script.scope === 'global' ? void runGlobal() : void runSelected()
+              }
             >
               <Play className="mr-1 h-3 w-3 fill-current" />
               {t.run}
@@ -318,18 +379,25 @@ export function ScriptRunPanel({
         </div>
       </header>
 
-      <ProfileSelector
-        profiles={profiles}
-        proxies={proxies}
-        runningProfileIds={runningProfileIds}
-        selected={selectedProfileIds}
-        onToggle={toggleProfile}
-        t={t}
-        onGoToEnvironments={onGoToEnvironments}
-        currentScriptId={script.id}
-        occupyByProfileId={occupyByProfileId}
-        scriptNameById={scriptNameById}
-      />
+      {/* 全局脚本不展示 profile 选择;给一行提示让用户知道这个 panel 是干嘛的 */}
+      {script.scope === 'global' ? (
+        <div className="border-b border-border bg-secondary/10 px-4 py-3">
+          <p className="text-[11px] text-muted-foreground">{t.globalRunHint}</p>
+        </div>
+      ) : (
+        <ProfileSelector
+          profiles={profiles}
+          proxies={proxies}
+          runningProfileIds={runningProfileIds}
+          selected={selectedProfileIds}
+          onToggle={toggleProfile}
+          t={t}
+          onGoToEnvironments={onGoToEnvironments}
+          currentScriptId={script.id}
+          occupyByProfileId={occupyByProfileId}
+          scriptNameById={scriptNameById}
+        />
+      )}
 
       <div className="flex-1 overflow-hidden">
         {visibleRuns.length === 0 ? (

@@ -38,6 +38,20 @@ export type Translations = {
   errorExternalPath: string
   saved: string
   deleted: string
+  /** scope 区域标题 */
+  scopeLabel: string
+  /** scope=profile 显示名 */
+  scopeProfile: string
+  /** scope=global 显示名 */
+  scopeGlobal: string
+  /** scope=profile 的解释行 */
+  scopeProfileHint: string
+  /** scope=global 的解释行 */
+  scopeGlobalHint: string
+  /** 列表里的 GLOBAL 徽章文字 */
+  globalBadge: string
+  /** 全局脚本运行面板:无 profile 选择,顶部提示文案 */
+  globalRunHint: string
 }
 
 export const labels: Record<Locale, Translations> = {
@@ -72,7 +86,14 @@ export const labels: Record<Locale, Translations> = {
     errorRequired: 'Name is required',
     errorExternalPath: 'External entry path is required',
     saved: 'Script saved: {{name}}',
-    deleted: 'Script removed'
+    deleted: 'Script removed',
+    scopeLabel: 'Scope',
+    scopeProfile: 'Profile',
+    scopeGlobal: 'Global',
+    scopeProfileHint: 'Runs against one environment; SDK exposes browser/page/profile/...',
+    scopeGlobalHint: 'Scheduler that drives other scripts; SDK exposes profiles/runScript (no browser).',
+    globalBadge: 'GLOBAL',
+    globalRunHint: 'Global scripts run without an environment. Click Run to execute.'
   },
   zh: {
     title: '脚本',
@@ -104,6 +125,13 @@ export const labels: Record<Locale, Translations> = {
     errorRequired: '名称必填',
     errorExternalPath: '外部脚本入口路径必填',
     saved: '脚本已保存:{{name}}',
-    deleted: '脚本已删除'
+    deleted: '脚本已删除',
+    scopeLabel: '作用域',
+    scopeProfile: '环境绑定',
+    scopeGlobal: '全局',
+    scopeProfileHint: '绑定到某个环境运行;SDK 含 browser/page/profile/... ',
+    scopeGlobalHint: '不绑环境的调度器;SDK 含 profiles/runScript,**没有** browser。',
+    globalBadge: '全局',
+    globalRunHint: '全局脚本不绑环境,点击"运行"直接执行。'
   }
 }

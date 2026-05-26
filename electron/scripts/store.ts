@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Script, ScriptDraft, ScriptRun, ScriptRunStatus, ScriptSource } from '../types'
+import type { Script, ScriptDraft, ScriptRun, ScriptRunStatus, ScriptScope, ScriptSource, ScriptTriggeredBy } from '../types'
 import { scriptRunLogsRoot, scriptsRoot } from '../paths'
 import { quarantineCorruptFile, writeJsonAtomic } from '../persistence'
 
@@ -11,13 +11,34 @@ const RUN_HISTORY_LIMIT = 200
 
 const DEFAULT_SCRIPT_SOURCE = `import { page, log, sleep } from 'auto-registry'
 
-// 脚本的主函数通过 default export 注册，bootstrap 会 await 它结束。
-// 也可以在底部直接调用 main()，只是写法稍乱，推荐用 export default。
-export default async function main() {
+// 脚本的主函数通过 default export 注册,bootstrap 会 await 它结束。
+// args 默认是 {}; profile 字段是当前环境的只读快照,可读但不可改。
+export default async function main(args) {
   const p = await page()
   await p.goto('https://example.com')
   log('title =', await p.title())
   await sleep(1000)
+}
+`
+
+/**
+ * 全局脚本默认模板。**没有** browser/page,**有** profiles / runScript。
+ *
+ * 这里写得很短,留给用户填业务。重点演示 runScript 的形状,让用户照葫芦画瓢。
+ */
+const DEFAULT_GLOBAL_SCRIPT_SOURCE = `import { profiles, runScript, log, sleep } from 'auto-registry'
+
+// 全局脚本是调度器:它不绑 profile、不开浏览器,只能编排其它 profile-scope 脚本。
+// 通过 runScript(scriptId, profileId, params?) 触发子脚本并 await 至结束。
+export default async function main(args) {
+  const all = await profiles.list()
+  log('found', all.length, 'profiles')
+  for (const p of all) {
+    // 在每个环境上跑一遍 someScriptId,把 args.params.keyword 透传给子脚本
+    // const result = await runScript('someScriptId', p.id, { keyword: 'demo' })
+    // log(p.name, '→', result.status)
+  }
+  await sleep(100)
 }
 `
 
@@ -86,21 +107,28 @@ export class ScriptStore {
       ? (draft.entryPath as string)
       : path.join(scriptsRoot(), scriptId, 'index.ts'))
 
+    // scope 一旦确定就不允许改 —— 改 scope 等价于换一种 SDK 表面,会让源码瞬间不可执行。
+    // 用户想换 scope 应该重新建一个脚本。
+    const scope: ScriptScope = existing?.scope ?? draft.scope ?? 'profile'
+
     const script: Script = {
       id: scriptId,
       name: draft.name.trim() || existing?.name || 'Untitled script',
       description: draft.description?.trim() || existing?.description,
       source: existing?.source ?? draft.source,
+      scope,
       entryPath,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     }
 
-    // local 新建脚本：落模板文件
+    // local 新建脚本:落模板文件。global 用全局模板,profile 用 profile 模板。
     if (!existing && script.source === 'local') {
       fs.mkdirSync(path.dirname(script.entryPath), { recursive: true })
       if (!fs.existsSync(script.entryPath)) {
-        fs.writeFileSync(script.entryPath, draft.initialSource ?? DEFAULT_SCRIPT_SOURCE)
+        const template = draft.initialSource
+          ?? (scope === 'global' ? DEFAULT_GLOBAL_SCRIPT_SOURCE : DEFAULT_SCRIPT_SOURCE)
+        fs.writeFileSync(script.entryPath, template)
       }
     }
 
@@ -167,7 +195,21 @@ export class ScriptStore {
     return this.runs
   }
 
-  createRun(scriptId: string, profileId: string): ScriptRun {
+  /**
+   * 创建一个 run 占位记录。运行结束后由 finalizeRun 落盘。
+   *
+   * profileId 留空字符串表示全局脚本(不绑 profile);profile-scope 必须传非空。
+   * triggeredBy / parentRunId / params 用于跟踪调度链,见 ScriptRun 字段注释。
+   */
+  createRun(
+    scriptId: string,
+    profileId: string,
+    options: {
+      triggeredBy?: ScriptTriggeredBy
+      parentRunId?: string
+      params?: Record<string, unknown>
+    } = {}
+  ): ScriptRun {
     const id = generateRunId()
     const logPath = path.join(scriptRunLogsRoot(), `${id}.log`)
     const run: ScriptRun = {
@@ -176,9 +218,12 @@ export class ScriptStore {
       profileId,
       status: 'pending',
       startedAt: new Date().toISOString(),
-      logPath
+      logPath,
+      triggeredBy: options.triggeredBy ?? 'manual',
+      parentRunId: options.parentRunId,
+      params: options.params
     }
-    // 先不持久化，等 finalize 才落盘；减少写放大
+    // 先不持久化,等 finalize 才落盘;减少写放大
     return run
   }
 
@@ -201,8 +246,16 @@ export class ScriptStore {
   private load(): void {
     try {
       if (fs.existsSync(this.metaFile)) {
-        const raw = JSON.parse(fs.readFileSync(this.metaFile, 'utf8')) as Script[]
-        this.scripts = Array.isArray(raw) ? raw : []
+        const raw = JSON.parse(fs.readFileSync(this.metaFile, 'utf8')) as Array<Partial<Script>>
+        // 老数据兼容:scope 字段是 spec phase 2 引入的,缺省补 'profile'(老脚本都是绑 profile)
+        this.scripts = Array.isArray(raw)
+          ? raw
+              .filter((script): script is Script => Boolean(script && script.id))
+              .map((script) => ({
+                ...script,
+                scope: script.scope ?? 'profile'
+              }))
+          : []
       }
     } catch (error) {
       console.error('[ScriptStore] failed to load script-meta.json', error)
@@ -212,8 +265,16 @@ export class ScriptStore {
 
     try {
       if (fs.existsSync(this.runHistoryFile)) {
-        const raw = JSON.parse(fs.readFileSync(this.runHistoryFile, 'utf8')) as ScriptRun[]
-        this.runs = Array.isArray(raw) ? raw : []
+        const raw = JSON.parse(fs.readFileSync(this.runHistoryFile, 'utf8')) as Array<Partial<ScriptRun>>
+        // 老 run 没 triggeredBy 字段,视为手动触发(spec §3.4)
+        this.runs = Array.isArray(raw)
+          ? raw
+              .filter((run): run is ScriptRun => Boolean(run && run.id))
+              .map((run) => ({
+                ...run,
+                triggeredBy: run.triggeredBy ?? 'manual'
+              }))
+          : []
       }
     } catch (error) {
       console.error('[ScriptStore] failed to load script-runs.json', error)

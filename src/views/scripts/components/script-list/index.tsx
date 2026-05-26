@@ -79,12 +79,19 @@ export function ScriptList({
                     }`}
                     onClick={() => onSelect(script.id)}
                   >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`truncate text-xs font-bold tracking-tight ${isActive ? 'text-primary' : ''}`}
-                      >
-                        {script.name}
-                      </span>
+                    <div className="flex items-center justify-between gap-1">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        {script.scope === 'global' && (
+                          <span className="inline-flex flex-none items-center border border-amber-400/40 bg-amber-400/10 px-1 py-px font-mono text-[8px] font-bold tracking-wider text-amber-400">
+                            {t.globalBadge}
+                          </span>
+                        )}
+                        <span
+                          className={`truncate text-xs font-bold tracking-tight ${isActive ? 'text-primary' : ''}`}
+                        >
+                          {script.name}
+                        </span>
+                      </div>
                       <SourceBadge source={script.source} t={t} />
                     </div>
                     {script.description && (

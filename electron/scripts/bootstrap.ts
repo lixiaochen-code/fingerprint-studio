@@ -18,8 +18,9 @@ import type { BrowserProfile } from '../types'
  */
 
 interface BootstrapEnv {
-  profile: BrowserProfile
-  webSocketDebuggerUrl: string
+  scope: 'profile' | 'global'
+  profile: BrowserProfile | null
+  webSocketDebuggerUrl: string | null
   workingDir: string
   entryPath: string
 }
@@ -30,10 +31,21 @@ function readBootstrapEnv(): BootstrapEnv {
     throw new Error('AUTO_REGISTRY_SCRIPT_CONTEXT is not set; bootstrap was invoked directly')
   }
   const parsed = JSON.parse(raw) as BootstrapEnv
-  if (!parsed.profile || !parsed.webSocketDebuggerUrl || !parsed.entryPath || !parsed.workingDir) {
+  // 默认 scope='profile' 兼容老 fork(主进程更新前发的 context 没 scope 字段)
+  const scope: 'profile' | 'global' = parsed.scope ?? 'profile'
+  if (!parsed.entryPath || !parsed.workingDir) {
     throw new Error('AUTO_REGISTRY_SCRIPT_CONTEXT is missing required fields')
   }
-  return parsed
+  if (scope === 'profile' && (!parsed.profile || !parsed.webSocketDebuggerUrl)) {
+    throw new Error('profile-scope script requires profile + webSocketDebuggerUrl in context')
+  }
+  return {
+    scope,
+    profile: parsed.profile ?? null,
+    webSocketDebuggerUrl: parsed.webSocketDebuggerUrl ?? null,
+    workingDir: parsed.workingDir,
+    entryPath: parsed.entryPath
+  }
 }
 
 /**
@@ -169,6 +181,7 @@ async function main(): Promise<void> {
   })
 
   const context: ScriptContext = {
+    scope: env.scope,
     profile: env.profile,
     webSocketDebuggerUrl: env.webSocketDebuggerUrl,
     workingDir: env.workingDir,
