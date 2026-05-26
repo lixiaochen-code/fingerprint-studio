@@ -47,12 +47,10 @@ export type Translations = {
   empty: string
   /** ID 列表头 */
   profileId: string
-  /** ID chip 默认 hover 提示尾巴(完整 id 之后)*/
-  profileIdCopy: string
-  /** 复制成功 tooltip */
-  profileIdCopied: string
-  /** 复制失败 tooltip */
-  profileIdCopyFailed: string
+  /** 复制成功 toast */
+  profileIdCopiedToast: string
+  /** 复制失败 toast */
+  profileIdCopyFailedToast: string
   /** 创建 profile 时 id 冲突 */
   profileIdTakenError: string
   /** 创建 profile 时 id 含非法字符 */
@@ -114,9 +112,8 @@ export const translations: Record<Locale, Translations> = {
     run: 'RUN',
     empty: 'NO ENVIRONMENTS FOUND.',
     profileId: 'ID',
-    profileIdCopy: 'click to copy',
-    profileIdCopied: 'Copied!',
-    profileIdCopyFailed: 'Copy failed',
+    profileIdCopiedToast: 'ID copied to clipboard.',
+    profileIdCopyFailedToast: 'Failed to copy ID.',
     profileIdTakenError: 'The id "{{id}}" is already taken by another environment.',
     profileIdInvalidError: 'The id "{{id}}" contains illegal characters. Allowed: A-Z a-z 0-9 . _ - · 1..64 chars.',
     osWindows: 'WINDOWS',
@@ -174,9 +171,8 @@ export const translations: Record<Locale, Translations> = {
     run: '启动',
     empty: '暂无环境。',
     profileId: 'ID',
-    profileIdCopy: '点击复制',
-    profileIdCopied: '已复制',
-    profileIdCopyFailed: '复制失败',
+    profileIdCopiedToast: 'ID 已复制到剪贴板。',
+    profileIdCopyFailedToast: '复制 ID 失败。',
     profileIdTakenError: 'ID「{{id}}」已被占用,请换一个。',
     profileIdInvalidError: 'ID「{{id}}」含非法字符。允许:A-Z a-z 0-9 . _ - · 1..64 字符。',
     osWindows: 'WINDOWS',

@@ -154,9 +154,8 @@ export function ProfilesTable({
                   <td className="p-4 align-middle">
                     <ProfileIdCell
                       id={profile.id}
-                      copyTooltip={t.profileIdCopy}
-                      copiedTooltip={t.profileIdCopied}
-                      copyFailedTooltip={t.profileIdCopyFailed}
+                      copiedToast={t.profileIdCopiedToast}
+                      copyFailedToast={t.profileIdCopyFailedToast}
                     />
                   </td>
                   <td className="p-4 align-middle">
