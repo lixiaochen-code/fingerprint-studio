@@ -3,11 +3,11 @@ import Editor, { loader, type OnMount } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { SCRIPT_EDITOR_TYPINGS } from '@/lib/scriptTypings'
+import { SCRIPT_EDITOR_TYPINGS } from '@/lib/script-typings'
 // monaco worker 的 setup 必须在 Editor 实例化前完成；放在这个模块顶层，
 // 这样懒加载 ScriptEditor 时一并把 worker 注册好，不会被首屏 bundle 拖累。
-import '@/lib/monacoSetup'
-import type { Script } from '../../electron/types'
+import '@/lib/monaco-setup'
+import type { Script } from '../../../../../electron/types'
 
 /**
  * 关键：`@monaco-editor/react` 默认通过 CDN（jsdelivr）加载它自己的 monaco 实例，
@@ -293,7 +293,7 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
   const editorPath = useMemo(() => `file:///scripts/${script.id}/index.ts`, [script.id])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full w-full flex-col">
       <div className="flex items-center justify-between border-b border-border bg-secondary/30 px-4 py-2 text-[11px] font-mono">
         <div className="flex items-center gap-3">
           {isReadOnly && (
@@ -310,7 +310,7 @@ export function ScriptEditor({ script, locale, theme }: ScriptEditorProps) {
           </Button>
         )}
       </div>
-      <div className="flex-1 overflow-hidden">
+      <div className="min-w-0 flex-1 overflow-hidden">
         {source === undefined ? (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
             <Loader2 className="mr-2 h-3 w-3 animate-spin" />

@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { interpolate } from '@/lib/i18n'
-import type { BrowserPlugin, BrowserProfile, Proxy } from '../../electron/types'
+import type { BrowserPlugin, BrowserProfile, Proxy } from '../../../electron/types'
 
 type Locale = 'en' | 'zh'
 

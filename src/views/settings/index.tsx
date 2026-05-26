@@ -3,7 +3,7 @@ import { Download, Trash2, Upload, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { interpolate } from '@/lib/i18n'
-import type { BrowserPlugin, KernelType, RuntimeInfo } from '../../electron/types'
+import type { BrowserPlugin, KernelType, RuntimeInfo } from '../../../electron/types'
 
 type Locale = 'en' | 'zh'
 

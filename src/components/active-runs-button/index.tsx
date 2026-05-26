@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { interpolate } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import type { BrowserProfile, Script, ScriptRun } from '../../electron/types'
+import type { BrowserProfile, Script, ScriptRun } from '../../../electron/types'
 
 type Locale = 'en' | 'zh'
 

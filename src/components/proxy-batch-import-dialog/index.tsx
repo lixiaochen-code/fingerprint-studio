@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2, FileText, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
-import type { Proxy } from '../../electron/types'
+import type { Proxy } from '../../../electron/types'
 
 /**
  * 批量导入代理对话框。

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
-import type { Proxy } from '../../electron/types'
+import type { Proxy } from '../../../electron/types'
 
 /**
  * profile 新建/编辑对话框里的代理下拉。

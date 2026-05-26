@@ -3,7 +3,7 @@ import { Loader2, Wifi, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import type { Proxy, ProxyDraft, ProxyScheme, ProxyTestSnapshot } from '../../electron/types'
+import type { Proxy, ProxyDraft, ProxyScheme, ProxyTestSnapshot } from '../../../electron/types'
 
 /**
  * 单代理新建/编辑对话框。

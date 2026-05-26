@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import type { BrowserPlugin, BrowserProfile, HostOs, ProfileDraft, Proxy, ProxyDraft, TargetOs, TargetOsChoice } from '../../electron/types'
-import { ProxySelectField } from './ProxySelectField'
-import { ProxyFormDialog } from './ProxyFormDialog'
+import type {
+  BrowserPlugin,
+  BrowserProfile,
+  HostOs,
+  ProfileDraft,
+  Proxy,
+  ProxyDraft,
+  TargetOs,
+  TargetOsChoice
+} from '../../../electron/types'
+import { ProxySelectField } from '../proxy-select-field'
+import { ProxyFormDialog } from '../proxy-form-dialog'
+import { PluginsSection } from './components/plugins-section'
 
 type Locale = 'en' | 'zh'
-
-const targetOsOptions: TargetOsChoice[] = ['random', 'windows', 'mac', 'linux']
 
 // Map Electron's hostOs enum to the TargetOs the user can pick. We use this so "Add new"
 // defaults the fingerprint OS to the user's machine — requested product behavior.
@@ -44,7 +51,8 @@ const labels = {
     osWindows: 'Windows',
     osMac: 'Mac',
     osLinux: 'Linux',
-    osRandom: 'Random'
+    osRandom: 'Random',
+    targetOsLockedHint: 'Locked to host OS. Cross-OS spoofing is disabled because Cloudflare client hints expose the real platform; per-profile differentiation is done via WebGL/Canvas/Audio/fonts instead.'
   },
   zh: {
     create: '新建环境',
@@ -69,7 +77,8 @@ const labels = {
     osWindows: 'Windows',
     osMac: 'Mac',
     osLinux: 'Linux',
-    osRandom: '随机'
+    osRandom: '随机',
+    targetOsLockedHint: '已锁定为宿主系统。跨 OS 伪装会暴露真实 client hints 被 Cloudflare 直接识破,因此停用;每个环境的差异化由 WebGL/Canvas/Audio/字体 等维度实现。'
   }
 } as const
 
@@ -227,9 +236,15 @@ export function ProfileFormDialog({ open, mode, initial, plugins, proxies, local
           <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder={t.namePlaceholder} />
         </Field>
         <Field label={t.targetOs}>
-          <Select value={form.targetOs} onChange={(value) => setForm((prev) => ({ ...prev, targetOs: value as TargetOsChoice }))}
-            options={targetOsOptions.map((option) => ({ value: option, label: targetLabel[option] }))}
-          />
+          {/*
+            目标系统改成只读展示:`fingerprint.ts::resolveTargetOs` 把 targetOs 钳到宿主,
+            UI 上保留"Target OS"标签,但下拉选项失去实际效果(选了也会被忽略)。直接显示
+            当前值 + 解释,比让用户做无效操作更诚实。
+          */}
+          <div className="flex h-10 items-center border border-input bg-muted/30 px-3 text-xs font-mono text-muted-foreground">
+            {targetLabel[form.targetOs]}
+          </div>
+          <p className="text-[11px] text-muted-foreground">{t.targetOsLockedHint}</p>
         </Field>
         <Field label={t.startUrl} className="md:col-span-2">
           <Input value={form.startUrl} onChange={(e) => setForm((prev) => ({ ...prev, startUrl: e.target.value }))} placeholder={t.startUrlPlaceholder} />
@@ -249,42 +264,14 @@ export function ProfileFormDialog({ open, mode, initial, plugins, proxies, local
         </Field>
       </div>
 
-      <div className="mt-6 border-t border-border pt-5">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="font-display text-xs font-bold uppercase tracking-wider">{t.plugins}</h3>
-            <p className="text-[11px] text-muted-foreground">{t.pluginsHint}</p>
-          </div>
-          <Button variant="outline" size="sm" className="gap-2" disabled={importing} onClick={() => void importPlugin()}>
-            <Upload className="h-3 w-3" />
-            {importing ? t.importing : t.importZip}
-          </Button>
-        </div>
-        {plugins.length === 0 ? (
-          <p className="border border-dashed border-border bg-background/50 p-4 text-center text-[11px] text-muted-foreground">{t.noPlugins}</p>
-        ) : (
-          <ul className="divide-y divide-border border border-border">
-            {plugins.map((plugin) => {
-              const active = plugin.versions.find((version) => version.id === plugin.activeVersionId)
-              const checked = form.enabledPluginIds.includes(plugin.id)
-              return (
-                <li key={plugin.id} className="flex items-center justify-between gap-3 bg-background px-3 py-2">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <Checkbox checked={checked} onChange={(value) => togglePlugin(plugin.id, value)} ariaLabel={plugin.name} />
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold tracking-tight">{plugin.name}</span>
-                      <span className="text-[10px] font-mono text-muted-foreground">
-                        v{active?.version || '—'} · {plugin.versions.length} version(s)
-                      </span>
-                    </div>
-                  </label>
-                  {plugin.description && <span className="text-[10px] text-muted-foreground line-clamp-1 max-w-[300px]">{plugin.description}</span>}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
+      <PluginsSection
+        plugins={plugins}
+        enabledPluginIds={form.enabledPluginIds}
+        onTogglePlugin={togglePlugin}
+        importing={importing}
+        onImportPlugin={importPlugin}
+        t={t}
+      />
 
       {error && <p className="mt-4 text-xs text-destructive">{error}</p>}
     </Dialog>
@@ -308,19 +295,5 @@ function Field({ label, children, className }: { label: string; children: React.
       <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
       {children}
     </label>
-  )
-}
-
-function Select({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="flex h-9 w-full border border-border bg-input px-3 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>{option.label}</option>
-      ))}
-    </select>
   )
 }

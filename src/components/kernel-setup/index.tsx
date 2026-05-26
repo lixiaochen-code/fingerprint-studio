@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { interpolate } from '@/lib/i18n'
-import type { KernelInstallProgress, KernelStatus, KernelType } from '../../electron/types'
+import type { KernelInstallProgress, KernelStatus, KernelType } from '../../../electron/types'
 
 type Locale = 'en' | 'zh'
 

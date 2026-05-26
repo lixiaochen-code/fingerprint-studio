@@ -598,9 +598,68 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// 应用准备退出时杀掉所有脚本子进程，避免孤儿；浏览器因为 detached:true 保持不变
-app.on('before-quit', () => {
-  void scriptRuntime?.shutdown()
+/**
+ * 优雅关闭所有由本应用启动的 Chromium 子进程。
+ *
+ * 设计:
+ * - 先 SIGTERM(Windows 上是 child.kill() 默认 SIGTERM 模拟),给 Chromium 一个机会
+ *   走完落盘 cookie/state 的流程
+ * - 平行等所有子进程 exit,最长 GRACEFUL_MS;超时后对仍存活的发 SIGKILL
+ * - 最后清空 profileProcesses,让重复调用幂等
+ *
+ * 之所以不复用 spawn 的 'exit' 事件做计数:那个 listener 在主进程里被 detached + unref
+ * 的子进程是否触发,跨平台行为不一致。这里直接用 Promise + setTimeout 自己控时序更稳。
+ */
+async function terminateAllProfileBrowsers(): Promise<void> {
+  const GRACEFUL_MS = 2500
+  const entries = Array.from(profileProcesses.values()).filter((child) => !child.killed)
+  if (entries.length === 0) return
+
+  const waiters = entries.map((child) => new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve()
+      return
+    }
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    child.once('exit', done)
+    try { child.kill('SIGTERM') } catch { done() }
+    setTimeout(() => {
+      if (settled) return
+      try { child.kill('SIGKILL') } catch {}
+      // SIGKILL 会很快触发 exit;万一没触发,再给一小段时间然后强制 resolve
+      setTimeout(done, 200)
+    }, GRACEFUL_MS)
+  }))
+
+  await Promise.all(waiters)
+  profileProcesses.clear()
+}
+
+// 应用准备退出:先杀脚本子进程(自身已实现 graceful shutdown),再杀所有 profile 浏览器,
+// 全部干净后才让 Electron 真正退出。preventDefault + app.exit() 是 Electron 推荐的
+// "异步等待清理"模式。
+let isQuitting = false
+app.on('before-quit', (event) => {
+  if (isQuitting) return
+  event.preventDefault()
+  isQuitting = true
+  void (async () => {
+    try {
+      await Promise.all([
+        scriptRuntime?.shutdown() ?? Promise.resolve(),
+        terminateAllProfileBrowsers()
+      ])
+    } catch (error) {
+      console.error('[main] cleanup before quit failed:', error)
+    } finally {
+      app.exit(0)
+    }
+  })()
 })
 
 app.on('activate', () => {
