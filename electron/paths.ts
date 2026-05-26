@@ -42,6 +42,28 @@ export function scriptsTypingsDir() {
   return path.join(scriptsRoot(), '.typings')
 }
 
+/**
+ * 代理子系统的持久化路径。
+ *
+ * - `proxiesFile()`:全部代理条目,带 schemaVersion(见 [electron/proxies/store.ts](./proxies/store.ts))
+ * - `proxyWhitelistsDir()`:每代理一个白名单 JSON 的目录
+ * - `proxyWhitelistFile(id)`:单个代理的白名单文件路径
+ *
+ * 白名单文件命名直接用 proxyId(没有 sanitize 的必要,id 本身就是 `proxy_xxxx`),方便外部
+ * 编辑器找到。
+ */
+export function proxiesFile() {
+  return path.join(dataRoot(), 'proxies.json')
+}
+
+export function proxyWhitelistsDir() {
+  return path.join(dataRoot(), 'proxy-whitelists')
+}
+
+export function proxyWhitelistFile(proxyId: string) {
+  return path.join(proxyWhitelistsDir(), `${proxyId}.json`)
+}
+
 export function ensureDirs() {
   for (const dir of [
     dataRoot(),
@@ -52,7 +74,8 @@ export function ensureDirs() {
     cloakRoot(),
     itbrowserRoot(),
     scriptsRoot(),
-    scriptRunLogsRoot()
+    scriptRunLogsRoot(),
+    proxyWhitelistsDir()
   ]) {
     fs.mkdirSync(dir, { recursive: true })
   }

@@ -4,6 +4,8 @@ import type { BrowserPlugin, BrowserProfile, PluginVersion, ProfileDraft, ProxyC
 import { makeFingerprint } from './fingerprint'
 import { dataRoot, profilesRoot } from './paths'
 import { quarantineCorruptFile, writeJsonAtomic } from './persistence'
+import { ProxyStore } from './proxies/store'
+import { migrateProfilesToProxyStore, type MigratableProfile } from './proxies/migration'
 
 const DEFAULT_PROXY: ProxyConfig = {
   host: '127.0.0.1',
@@ -49,8 +51,14 @@ export class ProfileStore {
   private readonly pluginsFile: string
   private profiles: BrowserProfile[] = []
   private plugins: BrowserPlugin[] = []
+  /**
+   * 迁移过程要把旧 inline proxy 落到 ProxyStore 才能写 proxyId,所以 ProfileStore 持有
+   * 一个 ProxyStore 引用。构造顺序由 main.ts 控制:先 new ProxyStore(),再 new ProfileStore(proxyStore)。
+   */
+  private readonly proxyStore: ProxyStore
 
-  constructor() {
+  constructor(proxyStore: ProxyStore) {
+    this.proxyStore = proxyStore
     this.root = dataRoot()
     this.profilesFile = path.join(this.root, 'profiles.json')
     this.pluginsFile = path.join(this.root, 'plugins.json')
@@ -106,6 +114,7 @@ export class ProfileStore {
       startUrl,
       enabledPluginIds: draft.enabledPluginIds ?? existing?.enabledPluginIds ?? [],
       proxy,
+      proxyId: this.resolveProxyId(draft, existing, proxy),
       fingerprint: makeFingerprint({ ...existing?.fingerprint, ...draft.fingerprint }, draft.targetOs),
       profilePath: existing?.profilePath || path.join(profilesRoot(), profileId),
       createdAt: existing?.createdAt || now,
@@ -138,6 +147,7 @@ export class ProfileStore {
       startUrl: source.startUrl,
       enabledPluginIds: [...source.enabledPluginIds],
       proxy: { ...source.proxy },
+      proxyId: source.proxyId,
       fingerprint: { ...source.fingerprint },
       targetOs: source.fingerprint.targetOs
     })
@@ -247,9 +257,24 @@ export class ProfileStore {
           fingerprint: makeFingerprint(rest.fingerprint)
         }
       })
-      this.profiles = normalizedProfiles
-      if (JSON.stringify(rawProfiles) !== JSON.stringify(normalizedProfiles)) {
-        writeJsonAtomic(this.profilesFile, normalizedProfiles)
+
+      // ProxyStore 迁移:把没有 proxyId 的 profile,根据 inline `proxy` 字段找/建 ProxyStore 条目。
+      // migration 模块是纯函数,需要把 ProxyStore 当前列表传进去 dedup,迁移完再 setAll 回去。
+      const migrationInput: MigratableProfile[] = normalizedProfiles as unknown as MigratableProfile[]
+      const { profiles: migratedRaw, proxies: nextProxies, migrated } = migrateProfilesToProxyStore(
+        migrationInput,
+        this.proxyStore.list()
+      )
+      if (migrated) {
+        this.proxyStore.setAll(nextProxies)
+      }
+      const finalProfiles = migratedRaw as unknown as BrowserProfile[]
+
+      this.profiles = finalProfiles
+      // 写回 profiles.json:任何"规范化"/迁移产生的变更都立刻持久化。
+      // (注:proxies.json 由 ProxyStore.setAll 自己持久化。)
+      if (migrated || JSON.stringify(rawProfiles) !== JSON.stringify(finalProfiles)) {
+        writeJsonAtomic(this.profilesFile, finalProfiles)
       }
     } catch (error) {
       console.error('[ProfileStore] failed to load profiles.json', error)
@@ -265,6 +290,35 @@ export class ProfileStore {
       quarantineCorruptFile(this.pluginsFile)
       this.plugins = []
     }
+  }
+
+  /**
+   * 决定一个 profile 最终保存时的 proxyId。
+   *
+   * 优先级:
+   *   1. draft 显式带了 `proxyId`(Phase 1c 后的 UI 走这条)→ 直接用,null 也接受
+   *   2. draft 带了 inline `proxy` 输入(老 ProfileFormDialog 兼容路径)→ 找/建 ProxyStore 条目
+   *   3. existing profile 有 proxyId → 保留
+   *   4. 全空 → null(系统代理)
+   */
+  private resolveProxyId(
+    draft: ProfileDraft,
+    existing: BrowserProfile | undefined,
+    derivedProxy: ProxyConfig
+  ): string | null {
+    if (Object.prototype.hasOwnProperty.call(draft, 'proxyId')) {
+      return draft.proxyId ?? null
+    }
+    if (draft.proxy && draft.proxy.host) {
+      return this.proxyStore.findOrCreateFromLegacyInline({
+        host: derivedProxy.host,
+        port: derivedProxy.port,
+        username: derivedProxy.username,
+        password: derivedProxy.password
+      })
+    }
+    if (existing?.proxyId !== undefined) return existing.proxyId
+    return null
   }
 
   private save() {

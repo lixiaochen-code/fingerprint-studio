@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, ProxyConfig, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, Proxy, ProxyConfig, ProxyDraft, ProxyTestSnapshot, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
 import type { ScriptRuntimeEvent } from './scripts/runtime'
 import type { ProxyTestResult } from './proxyTest'
 
@@ -45,6 +45,23 @@ const api = {
   },
   proxy: {
     test: (config: ProxyConfig) => ipcRenderer.invoke('proxy:test', config) as Promise<ProxyTestResult>
+  },
+  /**
+   * ProxyStore CRUD —— 由 ProxiesView 调用。`proxy.test` (上面那个) 走老 inline 输入,
+   * 给 ProfileFormDialog Phase 1c 之前的兼容路径用;ProxyStore 自身的探测走 `proxies.test`。
+   */
+  proxies: {
+    list: () => ipcRenderer.invoke('proxies:list') as Promise<Proxy[]>,
+    save: (draft: ProxyDraft) => ipcRenderer.invoke('proxies:save', draft) as Promise<Proxy>,
+    remove: (id: string) => ipcRenderer.invoke('proxies:remove', id) as Promise<void>,
+    bulkImport: (text: string) => ipcRenderer.invoke('proxies:bulkImport', text) as Promise<{
+      created: Proxy[]
+      reused: Proxy[]
+      failed: Array<{ line: string; reason: string }>
+    }>,
+    test: (id: string) => ipcRenderer.invoke('proxies:test', id) as Promise<
+      { ok: true; snapshot: ProxyTestSnapshot } | { ok: false; error: string }
+    >
   },
   runtime: {
     info: () => ipcRenderer.invoke('runtime:info') as Promise<RuntimeInfo>

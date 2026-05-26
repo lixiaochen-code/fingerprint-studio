@@ -6,7 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } fr
 import { extractFull } from 'node-7z'
 import sevenBin from '7zip-bin'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
+import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, ProxyDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
 import { hostOs } from './fingerprint'
 import {
   KernelMissingError,
@@ -24,11 +24,15 @@ import { ScriptStore } from './scripts/store'
 import { ScriptRuntimeManager, ProfileBusyError, type ScriptRuntimeEvent } from './scripts/runtime'
 import { runStartupJanitor } from './scripts/janitor'
 import { testProxy } from './proxyTest'
+import { testProxy as testProxyV2 } from './proxies/test'
+import { ProxyStore } from './proxies/store'
+import { parseProxyBatch } from './proxies/parser'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | undefined
 let store: ProfileStore
+let proxyStore: ProxyStore
 let scriptStore: ScriptStore
 let scriptRuntime: ScriptRuntimeManager
 const profileProcesses = new Map<string, ChildProcess>()
@@ -377,7 +381,8 @@ app.whenReady().then(async () => {
   // 启动自检：清掉上次会话的孤儿脚本子进程 + Chromium SingletonLock 残留。
   // 主进程被 SIGKILL / 断电 / dev 重启时这些痕迹清不掉，会导致下次启动浏览器卡住。
   await runStartupJanitor()
-  store = new ProfileStore()
+  proxyStore = new ProxyStore()
+  store = new ProfileStore(proxyStore)
   scriptStore = new ScriptStore()
   scriptRuntime = new ScriptRuntimeManager(scriptStore)
   scriptRuntime.on('event', (event: ScriptRuntimeEvent) => {
@@ -451,6 +456,32 @@ app.whenReady().then(async () => {
   ipcMain.handle('proxy:test', (_event, config: { host: string; port: number; username?: string; password?: string }) =>
     testProxy(config)
   )
+
+  // —— proxies subsystem (ProxyStore) ——————————————————————————
+  ipcMain.handle('proxies:list', () => proxyStore.list())
+  ipcMain.handle('proxies:save', (_event, draft: ProxyDraft) => proxyStore.upsert(draft))
+  ipcMain.handle('proxies:remove', (_event, id: string) => proxyStore.remove(id))
+  ipcMain.handle('proxies:bulkImport', (_event, text: string) => {
+    const parsed = parseProxyBatch(text)
+    const { created, reused } = proxyStore.bulkUpsert(parsed.ok.map((entry) => entry.draft))
+    return { created, reused, failed: parsed.failed }
+  })
+  // 测试 ProxyStore 条目 —— 与老 proxy:test 不同点:
+  //   1. 走 proxies/test.ts (含 ipinfo geo + scheme 感知)
+  //   2. 测试完成自动写回 lastTest 快照,UI 表格直接读
+  ipcMain.handle('proxies:test', async (_event, id: string) => {
+    const proxy = proxyStore.get(id)
+    if (!proxy) return { ok: false as const, error: 'Proxy not found' }
+    const snapshot = await testProxyV2({
+      scheme: proxy.scheme,
+      host: proxy.host,
+      port: proxy.port,
+      username: proxy.username,
+      password: proxy.password
+    })
+    proxyStore.recordTest(id, snapshot)
+    return { ok: true as const, snapshot }
+  })
   ipcMain.handle('plugins:list', () => store.listPlugins())
   ipcMain.handle('plugins:importZip', () => importPluginZip())
   ipcMain.handle('plugins:setActiveVersion', (_event, pluginId: string, versionId: string) => store.setActivePluginVersion(pluginId, versionId))
