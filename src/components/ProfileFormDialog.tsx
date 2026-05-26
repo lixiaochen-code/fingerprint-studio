@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Upload, Wifi, WifiOff } from 'lucide-react'
+import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { interpolate } from '@/lib/i18n'
-import type { BrowserPlugin, BrowserProfile, HostOs, ProfileDraft, TargetOs, TargetOsChoice } from '../../electron/types'
-import type { ProxyTestResult } from '../../electron/proxyTest'
+import type { BrowserPlugin, BrowserProfile, HostOs, ProfileDraft, Proxy, ProxyDraft, TargetOs, TargetOsChoice } from '../../electron/types'
+import { ProxySelectField } from './ProxySelectField'
+import { ProxyFormDialog } from './ProxyFormDialog'
 
 type Locale = 'en' | 'zh'
 
@@ -30,20 +30,7 @@ const labels = {
     startUrl: 'Start URL (optional)',
     startUrlPlaceholder: 'https://www.amazon.com',
     startUrlHint: 'Opened only on the very first launch of this environment. Later launches restore the existing tabs.',
-    proxyHost: 'Proxy Host',
-    proxyPort: 'Proxy Port',
-    proxyUsername: 'Proxy Username',
-    proxyPassword: 'Proxy Password',
-    proxyAuthHint: 'Optional. Leave blank for anonymous proxies. Credentials are saved locally and injected at launch via a helper extension.',
-    testProxy: 'Test connection',
-    testProxyTesting: 'Testing...',
-    testProxyOk: 'Reachable · {{latency}}ms',
-    testProxyFailTimeout: 'Timeout — proxy did not respond.',
-    testProxyFailRefused: 'Connection refused — host or port unreachable.',
-    testProxyFailAuth: 'Authentication failed — check username and password.',
-    testProxyFailHost: 'Invalid host — name could not be resolved.',
-    testProxyFailResponse: '{{message}}',
-    testProxyFailUnknown: '{{message}}',
+    proxy: 'Proxy',
     notes: 'Notes',
     notesPlaceholder: 'Optional operating notes',
     plugins: 'Plugins',
@@ -68,20 +55,7 @@ const labels = {
     startUrl: '启动网址（可选）',
     startUrlPlaceholder: 'https://www.amazon.com',
     startUrlHint: '仅在该环境首次启动时打开。之后启动会恢复上次的标签页，不会再跳转。',
-    proxyHost: '代理主机',
-    proxyPort: '代理端口',
-    proxyUsername: '代理账号',
-    proxyPassword: '代理密码',
-    proxyAuthHint: '可选。匿名代理请留空。账号密码仅保存在本地，启动时通过辅助扩展自动注入。',
-    testProxy: '测试连通性',
-    testProxyTesting: '测试中…',
-    testProxyOk: '可达 · {{latency}} 毫秒',
-    testProxyFailTimeout: '超时 — 代理无响应。',
-    testProxyFailRefused: '连接被拒 — 主机或端口不可达。',
-    testProxyFailAuth: '认证失败 — 请检查账号与密码。',
-    testProxyFailHost: '主机解析失败 — 请检查地址。',
-    testProxyFailResponse: '{{message}}',
-    testProxyFailUnknown: '{{message}}',
+    proxy: '代理',
     notes: '备注',
     notesPlaceholder: '可选运营备注',
     plugins: '插件',
@@ -104,20 +78,28 @@ export type ProfileFormDialogProps = {
   mode: 'create' | 'edit'
   initial?: BrowserProfile
   plugins: BrowserPlugin[]
+  /**
+   * 已保存的代理条目列表,由 App.tsx 加载并向下传。父组件应该在 ProxiesView 或本对话框
+   * 内部新建代理后,reload 然后再次传入。
+   */
+  proxies: Proxy[]
   locale: Locale
   hostOs: HostOs | undefined
   onCancel: () => void
   onSubmit: (draft: ProfileDraft) => Promise<void>
   onImportPlugin: () => Promise<BrowserPlugin | undefined>
+  /**
+   * 嵌套的"+ 新增代理"流程:本组件打开 ProxyFormDialog,用户提交后我们调这个回调,
+   * 父组件负责持久化(window.registry.proxies.save)并 reload proxies。我们用返回的
+   * Proxy.id 自动选中刚建好的代理。
+   */
+  onCreateProxy: (draft: ProxyDraft) => Promise<Proxy>
 }
 
 type FormState = {
   name: string
   startUrl: string
-  proxyHost: string
-  proxyPort: string
-  proxyUsername: string
-  proxyPassword: string
+  proxyId: string | null
   notes: string
   targetOs: TargetOsChoice
   enabledPluginIds: string[]
@@ -127,10 +109,8 @@ function blankForm(hostOs: TargetOsChoice): FormState {
   return {
     name: '',
     startUrl: '',
-    proxyHost: '127.0.0.1',
-    proxyPort: '7890',
-    proxyUsername: '',
-    proxyPassword: '',
+    // 默认无代理 —— 用户的产品诉求 "默认无代理,使用系统代理"。
+    proxyId: null,
     notes: '',
     targetOs: hostOs,
     enabledPluginIds: []
@@ -141,33 +121,29 @@ function formFromProfile(profile: BrowserProfile): FormState {
   return {
     name: profile.name,
     startUrl: profile.startUrl ?? '',
-    proxyHost: profile.proxy.host,
-    proxyPort: String(profile.proxy.port),
-    proxyUsername: profile.proxy.username ?? '',
-    proxyPassword: profile.proxy.password ?? '',
+    proxyId: profile.proxyId,
     notes: profile.notes,
     targetOs: profile.fingerprint.targetOs,
     enabledPluginIds: [...profile.enabledPluginIds]
   }
 }
 
-export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs, onCancel, onSubmit, onImportPlugin }: ProfileFormDialogProps) {
+export function ProfileFormDialog({ open, mode, initial, plugins, proxies, locale, hostOs, onCancel, onSubmit, onImportPlugin, onCreateProxy }: ProfileFormDialogProps) {
   const t = labels[locale]
   const defaultTarget = hostToTargetOs(hostOs)
   const [form, setForm] = useState<FormState>(() => blankForm(defaultTarget))
   const [submitting, setSubmitting] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | undefined>()
-  // 代理连通性测试结果。null = 还没点过；'pending' = 正在测；其它 = 主进程返回值。
-  // 关掉/重开对话框 / 改 host/port/auth 任何一项后会被重置回 null —— 旧结果挂在 UI 上会误导。
-  const [proxyTest, setProxyTest] = useState<ProxyTestResult | 'pending' | null>(null)
+  // 嵌套"新建代理"对话框,选了 + 新增 时打开。提交后自动选中返回的 proxy.id。
+  const [createProxyOpen, setCreateProxyOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
     setForm(initial ? formFromProfile(initial) : blankForm(defaultTarget))
     setError(undefined)
     setSubmitting(false)
-    setProxyTest(null)
+    setCreateProxyOpen(false)
   }, [open, initial, defaultTarget])
 
   const targetLabel = useMemo(() => ({
@@ -190,13 +166,8 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
         notes: form.notes,
         targetOs: form.targetOs,
         enabledPluginIds: form.enabledPluginIds,
-        proxy: {
-          host: form.proxyHost,
-          port: Number(form.proxyPort) || 7890,
-          username: form.proxyUsername.trim() || undefined,
-          // Passwords stay exactly as typed — trimming would silently break credentials with a leading/trailing space.
-          password: form.proxyPassword ? form.proxyPassword : undefined
-        }
+        // Phase 1c 起 proxy 完全走 proxyId 引用 —— 不再传 inline proxy。null = 系统代理。
+        proxyId: form.proxyId
       }
       await onSubmit(draft)
     } catch (caught) {
@@ -227,51 +198,16 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
     }))
   }
 
-  // 改任何一个代理字段都使旧结果失效。setForm 包一层让代理字段输入都走这里。
-  function updateProxyField<K extends 'proxyHost' | 'proxyPort' | 'proxyUsername' | 'proxyPassword'>(key: K, value: string) {
-    setForm((prev) => ({ ...prev, [key]: value }))
-    if (proxyTest !== null) setProxyTest(null)
-  }
-
-  async function runProxyTest() {
-    const portNum = Number(form.proxyPort)
-    if (!form.proxyHost.trim() || !Number.isFinite(portNum) || portNum <= 0) {
-      setProxyTest({ ok: false, code: 'BAD_HOST', message: 'host/port required' })
-      return
-    }
-    setProxyTest('pending')
-    try {
-      const result = await window.registry.proxy.test({
-        host: form.proxyHost.trim(),
-        port: portNum,
-        username: form.proxyUsername.trim() || undefined,
-        password: form.proxyPassword || undefined
-      })
-      setProxyTest(result)
-    } catch (err) {
-      // IPC 链路本身异常（理论上不会到这里，主进程已捕获所有错误归一化）
-      setProxyTest({
-        ok: false,
-        code: 'UNKNOWN',
-        message: err instanceof Error ? err.message : String(err)
-      })
-    }
-  }
-
-  // 把后端给的 code 映射到本地化文案
-  function proxyTestText(result: ProxyTestResult): string {
-    if (result.ok) return interpolate(t.testProxyOk, { latency: String(result.latencyMs ?? 0) })
-    switch (result.code) {
-      case 'TIMEOUT': return t.testProxyFailTimeout
-      case 'REFUSED': return t.testProxyFailRefused
-      case 'AUTH': return t.testProxyFailAuth
-      case 'BAD_HOST': return t.testProxyFailHost
-      case 'BAD_RESPONSE': return interpolate(t.testProxyFailResponse, { message: result.message ?? '' })
-      default: return interpolate(t.testProxyFailUnknown, { message: result.message ?? 'unknown' })
-    }
+  async function handleCreateProxy(draft: ProxyDraft): Promise<Proxy> {
+    const created = await onCreateProxy(draft)
+    // 自动选中刚建好的;父组件 reload 后下次渲染 proxies 数组里就有它
+    setForm((prev) => ({ ...prev, proxyId: created.id }))
+    setCreateProxyOpen(false)
+    return created
   }
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={onCancel}
@@ -299,45 +235,15 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
           <Input value={form.startUrl} onChange={(e) => setForm((prev) => ({ ...prev, startUrl: e.target.value }))} placeholder={t.startUrlPlaceholder} />
           <p className="text-[11px] text-muted-foreground">{t.startUrlHint}</p>
         </Field>
-        <Field label={t.proxyHost}>
-          <Input value={form.proxyHost} onChange={(e) => updateProxyField('proxyHost', e.target.value)} placeholder="127.0.0.1" />
-        </Field>
-        <Field label={t.proxyPort}>
-          <Input value={form.proxyPort} inputMode="numeric" onChange={(e) => updateProxyField('proxyPort', e.target.value)} placeholder="7890" />
-        </Field>
-        <Field label={t.proxyUsername}>
-          <Input
-            value={form.proxyUsername}
-            autoComplete="off"
-            onChange={(e) => updateProxyField('proxyUsername', e.target.value)}
-            placeholder="(optional)"
+        <Field label={t.proxy} className="md:col-span-2">
+          <ProxySelectField
+            value={form.proxyId}
+            proxies={proxies}
+            locale={locale}
+            onCreateNew={() => setCreateProxyOpen(true)}
+            onChange={(proxyId) => setForm((prev) => ({ ...prev, proxyId }))}
           />
         </Field>
-        <Field label={t.proxyPassword}>
-          <Input
-            value={form.proxyPassword}
-            type="password"
-            autoComplete="new-password"
-            onChange={(e) => updateProxyField('proxyPassword', e.target.value)}
-            placeholder="(optional)"
-          />
-        </Field>
-        <div className="md:col-span-2 -mt-2 flex flex-wrap items-center justify-between gap-3">
-          <p className="flex-1 min-w-[240px] text-[11px] text-muted-foreground">{t.proxyAuthHint}</p>
-          <div className="flex items-center gap-2">
-            <ProxyTestBadge result={proxyTest} render={proxyTestText} />
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              disabled={proxyTest === 'pending' || !form.proxyHost.trim() || !form.proxyPort.trim()}
-              onClick={() => void runProxyTest()}
-            >
-              {proxyTest === 'pending' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wifi className="h-3 w-3" />}
-              {proxyTest === 'pending' ? t.testProxyTesting : t.testProxy}
-            </Button>
-          </div>
-        </div>
         <Field label={t.notes} className="md:col-span-2">
           <Input value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t.notesPlaceholder} />
         </Field>
@@ -382,6 +288,17 @@ export function ProfileFormDialog({ open, mode, initial, plugins, locale, hostOs
 
       {error && <p className="mt-4 text-xs text-destructive">{error}</p>}
     </Dialog>
+
+    {/* 嵌套 dialog:打开时 Radix 自己处理 z-index 堆叠,ProxyFormDialog 用同样 Dialog 组件,
+        会被 Radix Portal 放到 body 末尾,显示在 ProfileFormDialog 之上 */}
+    <ProxyFormDialog
+      open={createProxyOpen}
+      mode="create"
+      locale={locale}
+      onCancel={() => setCreateProxyOpen(false)}
+      onSubmit={handleCreateProxy}
+    />
+    </>
   )
 }
 
@@ -405,31 +322,5 @@ function Select({ value, onChange, options }: { value: string; onChange: (value:
         <option key={option.value} value={option.value}>{option.label}</option>
       ))}
     </select>
-  )
-}
-
-/**
- * 代理测试结果徽章。三种形态：
- * - null：未测过 → 不渲染（避免占位抖动）
- * - 'pending'：和按钮里转圈是同一回事，不重复渲染
- * - ProxyTestResult：成功 = primary 绿色对勾；失败 = destructive 红色叉
- *
- * 文案统一通过 render 回调传进来，保持本地化逻辑都在父组件里。
- */
-function ProxyTestBadge({ result, render }: {
-  result: ProxyTestResult | 'pending' | null
-  render: (result: ProxyTestResult) => string
-}) {
-  if (!result || result === 'pending') return null
-  const ok = result.ok
-  const Icon = ok ? Wifi : WifiOff
-  const tone = ok
-    ? 'border-primary/40 bg-primary/10 text-primary'
-    : 'border-destructive/40 bg-destructive/10 text-destructive'
-  return (
-    <span className={`inline-flex items-center gap-1 border px-2 py-1 font-mono text-[10px] ${tone}`} title={result.message ?? ''}>
-      <Icon className="h-3 w-3" />
-      {render(result)}
-    </span>
   )
 }

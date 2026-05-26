@@ -31,15 +31,17 @@ import {
   Moon,
   Monitor,
   FileCode2,
-  Layers
+  Layers,
+  Globe2
 } from 'lucide-react'
-import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOs } from '../electron/types'
+import type { BrowserPlugin, BrowserProfile, KernelType, ProfileDraft, Proxy, ProxyDraft, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOs } from '../electron/types'
 import { KernelSetup } from './components/KernelSetup'
 import { ProfileFormDialog } from './components/ProfileFormDialog'
 import { ProfileDetailsDialog } from './components/ProfileDetailsDialog'
 import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog'
 import { SettingsView } from './components/SettingsView'
 import { ScriptsView } from './components/ScriptsView'
+import { ProxiesView } from './components/ProxiesView'
 import { KeepAlive } from './components/KeepAlive'
 import { ActiveRunsButton } from './components/ActiveRunsButton'
 import { interpolate } from './lib/i18n'
@@ -260,7 +262,7 @@ function formatDate(value?: string) {
   }
 }
 
-type View = 'profiles' | 'settings' | 'scripts'
+type View = 'profiles' | 'settings' | 'scripts' | 'proxies'
 
 type FormDialogState =
   | { open: false }
@@ -270,6 +272,7 @@ type FormDialogState =
 export function App() {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([])
   const [plugins, setPlugins] = useState<BrowserPlugin[]>([])
+  const [proxies, setProxies] = useState<Proxy[]>([])
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [busyId, setBusyId] = useState<string>()
@@ -307,15 +310,17 @@ export function App() {
   }, [resolvedTheme])
 
   async function load() {
-    const [nextProfiles, nextPlugins, statuses, nextRuntimeInfo, nextScripts] = await Promise.all([
+    const [nextProfiles, nextPlugins, statuses, nextRuntimeInfo, nextScripts, nextProxies] = await Promise.all([
       window.registry.profiles.list(),
       window.registry.plugins.list(),
       window.registry.profiles.status(),
       window.registry.runtime.info(),
-      window.registry.scripts.list()
+      window.registry.scripts.list(),
+      window.registry.proxies.list()
     ])
     setProfiles(nextProfiles)
     setPlugins(nextPlugins)
+    setProxies(nextProxies)
     setRunningIds(new Set(statuses.filter((status: any) => status.running).map((status: any) => status.profileId)))
     setRuntimeInfo(nextRuntimeInfo)
     setScripts(nextScripts)
@@ -614,6 +619,15 @@ export function App() {
         />
       </KeepAlive>
 
+      <KeepAlive visible={view === 'proxies'}>
+        <ProxiesView
+          proxies={proxies}
+          onReload={load}
+          locale={locale}
+          onToast={(message, kind) => kind === 'error' ? toast.error(message) : toast.success(message)}
+        />
+      </KeepAlive>
+
       <KeepAlive visible={view === 'settings'}>
         <div className="flex-1 overflow-auto">
           <SettingsView
@@ -633,11 +647,19 @@ export function App() {
         mode={formDialog.open ? formDialog.mode : 'create'}
         initial={formDialog.open && formDialog.mode === 'edit' ? formDialog.profile : undefined}
         plugins={plugins}
+        proxies={proxies}
         locale={locale}
         hostOs={runtimeInfo?.hostOs}
         onCancel={() => setFormDialog({ open: false })}
         onSubmit={submitProfile}
         onImportPlugin={importPluginFromForm}
+        onCreateProxy={async (draft: ProxyDraft) => {
+          // 嵌套"+ 新增代理"流:由 ProfileFormDialog 通过 ProxyFormDialog 触发。
+          // 我们持久化后立刻 reload 全局 proxies,然后把刚建的 Proxy 返回给对话框自动选中。
+          const created = await window.registry.proxies.save(draft)
+          await load()
+          return created
+        }}
       />
 
       <ProfileDetailsDialog
@@ -1027,6 +1049,7 @@ function Header({
   const navItems: Array<{ view: View; label: string; Icon: typeof Layers }> = [
     { view: 'profiles', label: locale === 'zh' ? '环境' : 'Environments', Icon: Layers },
     { view: 'scripts', label: locale === 'zh' ? '脚本' : 'Scripts', Icon: FileCode2 },
+    { view: 'proxies', label: locale === 'zh' ? '代理' : 'Proxies', Icon: Globe2 },
     { view: 'settings', label: t.settings, Icon: Settings2 }
   ]
 
