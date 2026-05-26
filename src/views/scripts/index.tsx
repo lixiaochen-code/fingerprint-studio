@@ -63,7 +63,7 @@ export function ScriptsView(props: ScriptsViewProps) {
   )
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-1 min-h-0 min-w-0">
       <ScriptList
         scripts={scripts}
         selectedScriptId={selectedScriptId}
