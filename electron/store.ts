@@ -19,6 +19,50 @@ function id() {
   return `env_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+/**
+ * profile.id 的合法性校验。规则放宽到"任意 ASCII 可见 + 长度 1..64",
+ * 因为后续上线/外部接入需要的 id 不一定是我们生成的格式 —— 用户拍板"格式无所谓,
+ * 全局唯一即可"。这里只挡住会让磁盘路径炸掉的字符:`/`、`\`、`..`、控制字符、空白。
+ */
+const PROFILE_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/
+
+function isValidProfileId(value: string): boolean {
+  return PROFILE_ID_PATTERN.test(value)
+}
+
+/**
+ * 创建 profile 时如果调用方指定的 id 已被占用,抛这个错误。IPC 层把它序列化成
+ * `{ ok:false, error:{ code:'PROFILE_ID_TAKEN', existingId } }` 透传给渲染端 / 全局脚本。
+ *
+ * 编辑现存 profile 不会触发此错误 —— 那条路径是"id 命中 existing → 修改字段",语义不冲突。
+ */
+export class ProfileIdTakenError extends Error {
+  readonly code = 'PROFILE_ID_TAKEN'
+  constructor(readonly existingId: string) {
+    super(`Profile id "${existingId}" is already in use`)
+    this.name = 'ProfileIdTakenError'
+  }
+
+  toJSON() {
+    return { code: this.code, existingId: this.existingId, message: this.message }
+  }
+}
+
+/**
+ * profile id 含非法字符时抛。
+ */
+export class InvalidProfileIdError extends Error {
+  readonly code = 'INVALID_PROFILE_ID'
+  constructor(readonly badId: string) {
+    super(`Invalid profile id "${badId}" (allowed: A-Z a-z 0-9 . _ - · 1..64 chars)`)
+    this.name = 'InvalidProfileIdError'
+  }
+
+  toJSON() {
+    return { code: this.code, badId: this.badId, message: this.message }
+  }
+}
+
 function pluginId(name: string) {
   return `plugin_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || Date.now().toString(36)}`
 }
@@ -73,7 +117,21 @@ export class ProfileStore {
   upsert(draft: ProfileDraft) {
     const now = new Date().toISOString()
     const existing = draft.id ? this.profiles.find((profile) => profile.id === draft.id) : undefined
-    const profileId = existing?.id ?? id()
+    // id 决议:
+    //   1) draft.id 存在 + 命中 existing → 编辑(沿用 existing.id)
+    //   2) draft.id 存在 + 没命中 existing → "按指定 id 新建"。上面 existing 是 undefined,
+    //      所以直接采用 draft.id。校验格式;若与现存任何 id 撞到这里其实已经在 1) 命中了,
+    //      不会落到这条分支。
+    //   3) draft.id 缺省 → 走我们的生成器
+    let profileId: string
+    if (existing) {
+      profileId = existing.id
+    } else if (draft.id) {
+      if (!isValidProfileId(draft.id)) throw new InvalidProfileIdError(draft.id)
+      profileId = draft.id
+    } else {
+      profileId = id()
+    }
 
     // 代理决议:proxyId 是真源。
     //   - draft 显式带 proxyId(包括 null = 无代理) → 直接采用
@@ -127,6 +185,25 @@ export class ProfileStore {
   remove(profileId: string) {
     this.profiles = this.profiles.filter((profile) => profile.id !== profileId)
     this.save()
+  }
+
+  /**
+   * 显式"创建新 profile"。与 upsert 的差别:
+   *   - upsert 看到 draft.id 命中 existing 时,默默切到编辑分支。
+   *   - create 看到同样情况时,抛 ProfileIdTakenError —— 调用方意图明确是新建,
+   *     id 冲突应该报错而不是把别人的 profile 改了。
+   *
+   * 全局脚本子系统(spec §5.2 profiles.create)会用这条;ProfileFormDialog 的"新建"
+   * 也应该走这里(目前老代码用的是 upsert,内部场景不传 id 不会冲突,但语义上走 create 更安全)。
+   */
+  create(draft: ProfileDraft): BrowserProfile {
+    if (draft.id) {
+      if (!isValidProfileId(draft.id)) throw new InvalidProfileIdError(draft.id)
+      const conflict = this.profiles.find((profile) => profile.id === draft.id)
+      if (conflict) throw new ProfileIdTakenError(conflict.id)
+    }
+    // upsert 内部命中 existing 才走编辑分支;走到这里 existing 必为 undefined,行为是"新建"
+    return this.upsert(draft)
   }
 
   duplicate(profileId: string) {

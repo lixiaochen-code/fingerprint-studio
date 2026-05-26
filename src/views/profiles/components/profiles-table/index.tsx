@@ -22,6 +22,7 @@ import type {
   ScriptRun,
   TargetOs
 } from '../../../../../electron/types'
+import { ProfileIdCell } from '../profile-id-cell'
 
 export interface ProfilesTableProps {
   t: Translations
@@ -101,6 +102,9 @@ export function ProfilesTable({
                   onChange={(checked) => onToggleAll(checked)}
                 />
               </th>
+              <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground w-[170px]">
+                {t.profileId}
+              </th>
               <th className="h-10 px-4 text-left align-middle font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
                 {t.environment}
               </th>
@@ -145,6 +149,14 @@ export function ProfilesTable({
                     <Checkbox
                       checked={checked}
                       onChange={(value) => onToggleSelect(profile.id, value)}
+                    />
+                  </td>
+                  <td className="p-4 align-middle">
+                    <ProfileIdCell
+                      id={profile.id}
+                      copyTooltip={t.profileIdCopy}
+                      copiedTooltip={t.profileIdCopied}
+                      copyFailedTooltip={t.profileIdCopyFailed}
                     />
                   </td>
                   <td className="p-4 align-middle">
@@ -276,7 +288,7 @@ export function ProfilesTable({
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="h-32 text-center text-muted-foreground font-mono">
+                <td colSpan={8} className="h-32 text-center text-muted-foreground font-mono">
                   {t.empty}
                 </td>
               </tr>

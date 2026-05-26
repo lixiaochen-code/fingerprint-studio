@@ -5,6 +5,17 @@ import type { ScriptRuntimeEvent } from '../electron/scripts/runtime'
 import type { ProxyTestResult } from '../electron/proxyTest'
 
 type LaunchResult = { ok: true } | { ok: false; error: { code?: string; kernel?: KernelType; message: string } }
+type ProfileSaveResult =
+  | { ok: true; profile: BrowserProfile }
+  | {
+      ok: false
+      error: {
+        message: string
+        code?: string
+        existingId?: string
+        badId?: string
+      }
+    }
 type ScriptRunResult =
   | { ok: true; run: ScriptRun }
   | {
@@ -21,7 +32,7 @@ declare global {
     registry: {
       profiles: {
         list: () => Promise<BrowserProfile[]>
-        save: (draft: ProfileDraft) => Promise<BrowserProfile>
+        save: (draft: ProfileDraft) => Promise<ProfileSaveResult>
         remove: (id: string) => Promise<void>
         duplicate: (id: string) => Promise<BrowserProfile>
         launch: (id: string) => Promise<LaunchResult>

@@ -28,6 +28,7 @@ import { testProxy as testProxyV2 } from './proxies/test'
 import type { ProxyAuthCredentials } from './proxyAuth'
 import { ProxyStore } from './proxies/store'
 import { parseProxyBatch } from './proxies/parser'
+import { ProfileIdTakenError, InvalidProfileIdError } from './store'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
 
 const isDev = !app.isPackaged
@@ -393,6 +394,12 @@ function serializeError(error: unknown) {
   if (error instanceof ProfileBusyError) {
     return error.toJSON()
   }
+  if (error instanceof ProfileIdTakenError) {
+    return error.toJSON()
+  }
+  if (error instanceof InvalidProfileIdError) {
+    return error.toJSON()
+  }
   if (error instanceof Error) {
     return { message: error.message }
   }
@@ -414,7 +421,18 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('profiles:list', () => store.list())
-  ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => store.upsert(draft))
+  // profiles:save 返回 { ok, profile?, error? }:
+  // - ok=true → 成功路径,profile 字段是新建/编辑后的 BrowserProfile
+  // - ok=false + code='PROFILE_ID_TAKEN' / 'INVALID_PROFILE_ID' → 渲染层友好提示
+  // 改用结构化返回是因为新增的 id 校验会触发 error code,渲染层需要按 code 分支提示。
+  ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => {
+    try {
+      const profile = store.upsert(draft)
+      return { ok: true as const, profile }
+    } catch (error) {
+      return { ok: false as const, error: serializeError(error) }
+    }
+  })
   ipcMain.handle('profiles:remove', async (_event, id: string) => {
     const profile = store.get(id)
     const running = profileProcesses.get(id)

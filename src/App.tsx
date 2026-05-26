@@ -220,7 +220,23 @@ export function App() {
   }
 
   async function submitProfile(draft: ProfileDraft) {
-    await window.registry.profiles.save(draft)
+    const result = await window.registry.profiles.save(draft)
+    if (!result.ok) {
+      // ProfileFormDialog 接到 throw 时会 setError 展示在表单底部 —— 把结构化错误
+      // 转成本地化文案再 throw,onSubmit 调用方就能拿到友好提示。
+      const code = result.error.code
+      let message = result.error.message
+      if (code === 'PROFILE_ID_TAKEN') {
+        message = interpolate(t.profileIdTakenError, {
+          id: result.error.existingId ?? draft.id ?? ''
+        })
+      } else if (code === 'INVALID_PROFILE_ID') {
+        message = interpolate(t.profileIdInvalidError, {
+          id: result.error.badId ?? draft.id ?? ''
+        })
+      }
+      throw new Error(message)
+    }
     setFormDialog({ open: false })
     await reload()
   }
