@@ -48,9 +48,9 @@ function pick<T>(items: T[]): T {
 
 function chromeVersion() {
   // 范围必须 ≥ Cloudflare Turnstile 的最低门槛(2026Q2 起为 v146+)。低于这个范围
-  // 直接被官方 "Unsupported Browser" 拦截。同时启动期还会被 alignUserAgentWithKernel
-  // 强制改成真实 kernel 版本,这里只是 profile 持久化时的兜底 —— 即便 kernel 没装好
-  // 也别让 UA 跌破门槛。需要时同步抬高下限。
+  // 直接被官方 "Unsupported Browser" 拦截。需要时同步抬高下限。
+  // (Phase 1d 起 chromium 启动不再传 --user-agent,navigator.userAgent 跟实际内核
+  // 走;这里只是 profile 持久化时的兜底字段,UI/详情显示用。)
   const major = 146 + Math.floor(Math.random() * 4)
   return `${major}.0.${Math.floor(1000 + Math.random() * 7999)}.${Math.floor(10 + Math.random() * 89)}`
 }
@@ -351,19 +351,6 @@ const LEGACY_INJECT = `
   }
 })();
 `
-
-/**
- * @deprecated Phase 1d 起 chromium 路径不再传 `--user-agent`,所以也不再需要在启动时
- * 把 profile.fingerprint.userAgent 对齐到真实内核版本。保留实现仅供后续可能的 itbrowser /
- * cloak 内核侧 fingerprint payload 写盘时复用,目前不在调用链中。
- */
-function alignUserAgentWithKernel(userAgent: string, kernelVersion: string | undefined): string {
-  if (!kernelVersion) return userAgent
-  // 真实版本至少要形如 a.b.c.d(Chrome for Testing 用满四段)。Chromium 老快照号
-  // (纯数字 build id)和 cloak 自定义版本号不在此覆盖,免得改坏。
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(kernelVersion)) return userAgent
-  return userAgent.replace(/Chrome\/[\d.]+/, `Chrome/${kernelVersion}`)
-}
 
 export function ensureFingerprintExtension(profile: BrowserProfile, mode: FingerprintInjectMode = 'stealth') {
   const extensionPath = path.join(profile.profilePath, 'auto-registry-fingerprint-extension')

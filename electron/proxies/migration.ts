@@ -15,7 +15,8 @@ import type { Proxy, ProxyScheme } from './schema'
 import { proxyDedupKey } from './schema'
 
 /**
- * 旧 inline proxy 形状。store.ts 写过的真实数据可能多带字段,这里只读我们关心的。
+ * 旧 inline proxy 形状。历史数据(Phase 1c 之前的 profiles.json)可能有这个字段;
+ * 这里只读我们关心的几列,其它字段忽略。
  */
 interface LegacyProxyShape {
   host?: string
@@ -27,8 +28,7 @@ interface LegacyProxyShape {
 
 /**
  * 迁移阶段我们对 profile 形状要求很少 —— 有 proxy 或 proxyId 都行。返回时新 profile 上一定
- * 有 proxyId(可能 null),inline proxy 字段也保留(Phase 1c 清掉),以维持 ProfileFormDialog
- * 的旧 UI 在 Phase 1a/b 仍可工作。
+ * 有 proxyId(可能 null);老 inline `proxy` 字段被剥掉,真源单一指向 ProxyStore。
  */
 export interface MigratableProfile {
   id: string
@@ -78,13 +78,23 @@ export function migrateProfilesToProxyStore<P extends MigratableProfile>(
   let migrated = false
   const nextProfiles = rawProfiles.map((profile, idx) => {
     // 已经迁移过:有非空 proxyId 时跳过。proxyId 为 null 也视为"已表态",不再处理。
-    if (profile.proxyId !== undefined) return profile
+    // 即便如此也要剥掉残留的 inline `proxy` 字段(Phase 1c 之前可能写盘过)。
+    if (profile.proxyId !== undefined) {
+      if (profile.proxy !== undefined) {
+        const { proxy: _legacy, ...rest } = profile
+        migrated = true
+        return rest as P
+      }
+      return profile
+    }
 
     const inline = profile.proxy
+    // 不论走哪个分支,迁移后的 profile 上都不再保留 inline 字段。
+    const { proxy: _stripped, ...stripped } = profile
     if (!inline || !inline.host || !inline.port) {
       // 没有 inline proxy,新规则默认 null = 系统代理
       migrated = true
-      return { ...profile, proxyId: null }
+      return { ...stripped, proxyId: null } as P
     }
 
     const scheme = normalizeScheme(inline.scheme)
@@ -115,7 +125,7 @@ export function migrateProfilesToProxyStore<P extends MigratableProfile>(
       dedupMap.set(key, proxyId)
     }
     migrated = true
-    return { ...profile, proxyId }
+    return { ...stripped, proxyId } as P
   })
 
   return { profiles: nextProfiles, proxies: nextProxies, migrated }

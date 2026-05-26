@@ -145,8 +145,8 @@ export function App() {
     const needle = query.trim().toLowerCase()
     if (!needle) return profiles
     // 代理搜索从 ProxyStore 真源派生:支持搜代理"名字" + "host:port",
-    // 命中即视为该 profile 的代理匹配。inline profile.proxy 字段在 Phase 1c 之前是兼容
-    // 镜像,proxyId=null 时为空,搜也搜不到,所以这里直接用 proxies 表查。
+    // 命中即视为该 profile 的代理匹配。proxyId=null 或命不中条目 → 视为无代理,
+    // 搜不到。
     const proxyById = new Map(proxies.map((proxy) => [proxy.id, proxy] as const))
     return profiles.filter((profile) => {
       const proxy = profile.proxyId ? proxyById.get(profile.proxyId) : undefined

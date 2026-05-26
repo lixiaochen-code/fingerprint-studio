@@ -236,8 +236,8 @@ export interface BuildLaunchArgsOptions {
   initialUrl?: string
   /**
    * 当 profile 关联了一份代理凭据时把 host/port 透传给 proxy-auth 扩展;`undefined` =
-   * 无代理或代理无凭据,跳过扩展生成。kernel 不直接读 profile.proxy.username/password,
-   * 因为那条 deprecated 路径在"无代理"语义下仍残留旧值。
+   * 无代理或代理无凭据,跳过扩展生成。代理凭据从 ProxyStore via profile.proxyId 取,
+   * 是上层(main.ts)的责任,kernel 这层只机械组装命令行。
    */
   proxyAuth?: ProxyAuthCredentials
 }

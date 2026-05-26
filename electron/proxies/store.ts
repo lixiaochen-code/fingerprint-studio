@@ -10,8 +10,8 @@
  *
  * 与 ProfileStore 的关系:
  * - ProfileStore 在 load 时调 migration 把旧 inline proxy 落到 ProxyStore,这一步通过传入
- *   ProxyStore 句柄完成。upsert profile 时 store 也会调 findOrCreateByDraft 把新输入的
- *   inline proxy 同步成 ProxyStore 条目(Phase 1a 阶段为了兼容旧 UI 还保留)。
+ *   ProxyStore 句柄完成
+ * - 之后 ProfileFormDialog 直接用 proxyId 选择,不再走 inline 兼容路径
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -169,46 +169,6 @@ export class ProxyStore {
     this.proxies = this.proxies.map((p) => p.id === id ? next : p)
     this.save()
     return next
-  }
-
-  /**
-   * 主要给 ProfileStore.upsert 用 —— 老 ProfileFormDialog 还在递 inline proxy 时,我们把它
-   * 转成 ProxyStore 条目;dedup 已存在的不重复创建。返回最终 proxyId(null 当 host 为空)。
-   *
-   * Phase 1c 切到 dropdown UI 后,这条 helper 应该弃用,改成 UI 显式调 upsert。
-   */
-  findOrCreateFromLegacyInline(args: {
-    host?: string
-    port?: number | string
-    username?: string
-    password?: string
-    scheme?: string
-    name?: string
-  }): string | null {
-    const host = args.host?.trim()
-    const portNum = Number(args.port)
-    if (!host || !Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) return null
-    const scheme = (args.scheme === 'https' || args.scheme === 'socks5' || args.scheme === 'socks4')
-      ? args.scheme as 'https' | 'socks5' | 'socks4'
-      : 'http'
-    const key = proxyDedupKey({
-      scheme,
-      host,
-      port: portNum,
-      username: args.username,
-      password: args.password
-    })
-    const existing = this.proxies.find((p) => proxyDedupKey(p) === key)
-    if (existing) return existing.id
-    const created = this.upsert({
-      name: args.name?.trim() || `Imported - ${host}:${portNum}`,
-      scheme,
-      host,
-      port: portNum,
-      username: args.username,
-      password: args.password
-    })
-    return created.id
   }
 
   private load(): void {

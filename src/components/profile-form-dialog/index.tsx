@@ -175,7 +175,7 @@ export function ProfileFormDialog({ open, mode, initial, plugins, proxies, local
         notes: form.notes,
         targetOs: form.targetOs,
         enabledPluginIds: form.enabledPluginIds,
-        // Phase 1c 起 proxy 完全走 proxyId 引用 —— 不再传 inline proxy。null = 系统代理。
+        // 代理只通过 proxyId 引用 ProxyStore 条目;null = 无代理(走系统代理)。
         proxyId: form.proxyId
       }
       await onSubmit(draft)

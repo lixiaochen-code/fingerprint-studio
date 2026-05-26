@@ -47,8 +47,9 @@ const api = {
     test: (config: ProxyConfig) => ipcRenderer.invoke('proxy:test', config) as Promise<ProxyTestResult>
   },
   /**
-   * ProxyStore CRUD —— 由 ProxiesView 调用。`proxy.test` (上面那个) 走老 inline 输入,
-   * 给 ProfileFormDialog Phase 1c 之前的兼容路径用;ProxyStore 自身的探测走 `proxies.test`。
+   * ProxyStore CRUD —— 由 ProxiesView 调用。`proxy.test` (上面那个) 是轻量的"按 host/port
+   * 输入做一次 CONNECT 探测",不持久化结果;ProfileFormDialog 在用户输代理时也用这个做实时
+   * 反馈。`proxies.test` 是带 id 的探测,会把结果记到 ProxyStore 条目的 lastTest 字段。
    */
   proxies: {
     list: () => ipcRenderer.invoke('proxies:list') as Promise<Proxy[]>,

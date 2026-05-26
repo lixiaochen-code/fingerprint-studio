@@ -31,8 +31,8 @@ export interface ProfilesViewProps {
   onReload: () => void
   filtered: BrowserProfile[]
   /**
-   * ProxyStore 真源。表格"代理"列 + 行 tooltip 都按 profile.proxyId 查这里。
-   * inline profile.proxy 字段已是 deprecated 兼容镜像,proxyId=null 时为空,不能再用。
+   * ProxyStore 真源。表格"代理"列 + 行 tooltip 都按 profile.proxyId 查这里;
+   * proxyId=null 或在 ProxyStore 中找不到 → 显示"无代理"。
    */
   proxies: Proxy[]
   runningIds: Set<string>

@@ -23,8 +23,7 @@ export interface ScriptRunPanelProps {
   profiles: BrowserProfile[]
   /**
    * ProxyStore 真源。tooltip 里显示代理 host:port 时按 profile.proxyId 查这里;
-   * 不传或 proxyId 命不中 → 显示"无代理"。inline profile.proxy 字段已是 deprecated
-   * 兼容镜像,在"无代理"语义下为空,不能再当显示来源用。
+   * 不传或 proxyId 命不中 → 显示"无代理"。
    */
   proxies: Proxy[]
   runningProfileIds: Set<string>

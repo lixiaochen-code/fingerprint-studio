@@ -54,13 +54,9 @@ export type BrowserProfile = {
   startUrl?: string
   enabledPluginIds: string[]
   /**
-   * @deprecated Phase 1a 期间仍保留以兼容老 UI/旧 kernel.ts 路径,Phase 1c 后移除。
-   * 真实代理配置查 ProxyStore via `proxyId`。null = 用系统代理(不传 --proxy-server)。
-   */
-  proxy: ProxyConfig
-  /**
    * 关联到 ProxyStore 的代理 ID;null = 无代理(走系统代理)。
-   * Phase 1a 迁移时由 [electron/proxies/migration.ts](./proxies/migration.ts) 写入。
+   * Phase 1a 迁移时由 [electron/proxies/migration.ts](./proxies/migration.ts) 写入,
+   * 之后所有 reader(kernel.ts / proxyAuth.ts / 各 view)都从 ProxyStore via 这个 id 取真值。
    */
   proxyId: string | null
   fingerprint: FingerprintConfig
@@ -133,13 +129,7 @@ export type ProfileDraft = {
   notes?: string
   startUrl?: string
   enabledPluginIds?: string[]
-  /**
-   * @deprecated 老 ProfileFormDialog 在 Phase 1c 之前还在传 inline 代理输入。
-   * 主进程的 ProfileStore.upsert 收到 inline proxy 会找/建 ProxyStore 条目,
-   * 然后 set profile.proxyId。Phase 1c UI 切到 dropdown 后此字段移除。
-   */
-  proxy?: Partial<ProxyConfig>
-  /** Phase 1c 后唯一代理来源 —— null = 无代理(系统代理) */
+  /** 唯一代理来源 —— ProxyStore 条目 id;null = 无代理(系统代理) */
   proxyId?: string | null
   fingerprint?: Partial<FingerprintConfig>
   targetOs?: TargetOsChoice

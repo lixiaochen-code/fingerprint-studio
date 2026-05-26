@@ -2,8 +2,8 @@
  * 代理子系统的类型定义,所有其它文件都从这里 import。
  *
  * 设计要点:
- * - `Proxy` 是用户可见的代理条目(有名字、可被多个 profile 复用)。`ProxyConfig` 仅保留
- *   作为旧 inline 数据的过渡类型,Phase 1c 后退役。
+ * - `Proxy` 是用户可见的代理条目(有名字、可被多个 profile 复用)。`ProxyConfig` 是
+ *   `proxy:test` IPC 的轻量入参类型(host/port/username/password),不参与持久化。
  * - `ProxyScheme` 支持 http/https/socks5/socks4 —— 这四种是 chrome.proxy.settings 的
  *   `singleProxy.scheme` 合法值,与 Chromium `--proxy-server=<scheme>://...` 也一致。
  * - `lastTest` 是 UI 渲染的快照,不是配置;每次刷新延迟/地理时被覆盖。
@@ -78,8 +78,8 @@ export type ParseProxyLineResult =
   | { ok: false; line: string; reason: string }
 
 /**
- * 在 Phase 1a 期间,旧 inline 数据(BrowserProfile.proxy: ProxyConfig)迁移到 ProxyStore 时
- * 用 `host:port:user:pass` 作为 dedup key,完全相同的代理只在 ProxyStore 里建一条。
+ * `host:port:user:pass` 作为 dedup key —— 完全相同的代理在 ProxyStore 里只建一条。
+ * 老数据迁移(migration.ts)和批量导入(bulkUpsert)都用它去重。
  */
 export function proxyDedupKey(args: {
   scheme?: ProxyScheme | string

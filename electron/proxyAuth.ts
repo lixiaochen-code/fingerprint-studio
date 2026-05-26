@@ -18,8 +18,8 @@ import type { BrowserProfile } from './types'
 const EXTENSION_DIR_NAME = 'auto-registry-proxy-auth-extension'
 
 /**
- * 主进程把 ProxyStore 里的真值传进来 —— 不再从 profile.proxy 这条 deprecated 派生路径取,
- * 否则当用户选"无代理"(proxyId=null)时,inline 字段还残留旧 host:port,会误以为要鉴权。
+ * 主进程把 ProxyStore 里的真值传进来 —— 调用方负责通过 profile.proxyId 查 ProxyStore
+ * 拿凭据。当用户选"无代理"(proxyId=null)时调用方传 undefined,这里就跳过扩展生成。
  */
 export interface ProxyAuthCredentials {
   host: string

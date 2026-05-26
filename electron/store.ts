@@ -1,22 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { BrowserPlugin, BrowserProfile, PluginVersion, ProfileDraft, ProxyConfig } from './types'
+import type { BrowserPlugin, BrowserProfile, PluginVersion, ProfileDraft } from './types'
 import { makeFingerprint } from './fingerprint'
 import { dataRoot, profilesRoot } from './paths'
 import { quarantineCorruptFile, writeJsonAtomic } from './persistence'
 import { ProxyStore } from './proxies/store'
 import { migrateProfilesToProxyStore, type MigratableProfile } from './proxies/migration'
-
-/**
- * 旧 inline proxy 字段在 Phase 1c 之前还得保留(类型 + 兼容老 UI),但**真源**已经
- * 迁到 ProxyStore + profile.proxyId。这里的"空代理占位"专门用于 proxyId=null 时
- * 写回 inline 字段的兜底,避免外部读到 NaN/undefined 造成显示错乱。UI 列表/详情应该
- * 直接读 proxies 列表,不要再依赖 inline。
- */
-const EMPTY_INLINE_PROXY: ProxyConfig = {
-  host: '',
-  port: 0
-}
 
 function systemLocale() {
   return `${process.env.LANG || process.env.LC_ALL || process.env.LC_MESSAGES || ''}`.toLowerCase().startsWith('zh') ? 'zh' : 'en'
@@ -86,52 +75,21 @@ export class ProfileStore {
     const existing = draft.id ? this.profiles.find((profile) => profile.id === draft.id) : undefined
     const profileId = existing?.id ?? id()
 
-    // 代理决议分两步:
-    //   1. 先决定 proxyId(真源):
-    //      - draft 显式带 proxyId(Phase 1c UI)→ 直接采用,null 也接受
-    //      - draft 仅带 inline proxy 输入(老 UI 兼容路径)→ 走 ProxyStore.findOrCreateFromLegacyInline
-    //      - 全空 → 保留 existing.proxyId,默认 null(无代理)
-    //   2. 再据 proxyId 镜像出 inline `proxy` 字段(Phase 1c 之前类型上必填):
-    //      - proxyId=null → EMPTY_INLINE_PROXY,这样"无代理"语义透到 inline 字段
-    //      - proxyId 命中 ProxyStore → 镜像 host/port/username/password
-    //      - proxyId 字符串但 ProxyStore 找不到(数据漂移)→ EMPTY_INLINE_PROXY
+    // 代理决议:proxyId 是真源。
+    //   - draft 显式带 proxyId(包括 null = 无代理) → 直接采用
+    //   - draft 没带 proxyId 这个 key → 保留 existing.proxyId
+    //   - existing 也没有 → null(无代理 = 走系统代理)
     //
-    // 注意:渲染层应直接读 proxies 列表+proxyId,不要再依赖这里镜像出的 inline。
-    // 镜像保留只为 Phase 1c 之前未迁移的代码不崩。
-    const draftProxyInput = draft.proxy
-    const legacyInlineId = draftProxyInput && draftProxyInput.host?.trim()
-      ? this.proxyStore.findOrCreateFromLegacyInline({
-          host: draftProxyInput.host,
-          port: typeof draftProxyInput.port === 'number'
-            ? draftProxyInput.port
-            : Number(draftProxyInput.port),
-          username: draftProxyInput.username,
-          password: draftProxyInput.password
-        })
-      : undefined
-
+    // inline proxy 字段已在 Phase 1c 删除;旧 UI 的 inline proxy 输入路径不再支持
+    // (ProfileFormDialog 自 Phase 1b 起只递 proxyId)。
     let resolvedProxyId: string | null
     if (Object.prototype.hasOwnProperty.call(draft, 'proxyId')) {
       resolvedProxyId = draft.proxyId ?? null
-    } else if (legacyInlineId !== undefined) {
-      resolvedProxyId = legacyInlineId
     } else if (existing?.proxyId !== undefined) {
       resolvedProxyId = existing.proxyId
     } else {
       resolvedProxyId = null
     }
-
-    const proxy: ProxyConfig = (() => {
-      if (!resolvedProxyId) return { ...EMPTY_INLINE_PROXY }
-      const stored = this.proxyStore.get(resolvedProxyId)
-      if (!stored) return { ...EMPTY_INLINE_PROXY }
-      return {
-        host: stored.host,
-        port: stored.port,
-        username: stored.username,
-        password: stored.password
-      }
-    })()
 
     // startUrl 是可选字段。语义：
     //   - draft 带 startUrl key（即使是空字符串）→ 用 draft 的值（normalize 后可能 undefined）
@@ -147,7 +105,6 @@ export class ProfileStore {
       notes: draft.notes?.trim() || existing?.notes || '',
       startUrl,
       enabledPluginIds: draft.enabledPluginIds ?? existing?.enabledPluginIds ?? [],
-      proxy,
       proxyId: resolvedProxyId,
       fingerprint: makeFingerprint({ ...existing?.fingerprint, ...draft.fingerprint }, draft.targetOs),
       profilePath: existing?.profilePath || path.join(profilesRoot(), profileId),
@@ -180,7 +137,6 @@ export class ProfileStore {
       notes: source.notes,
       startUrl: source.startUrl,
       enabledPluginIds: [...source.enabledPluginIds],
-      proxy: { ...source.proxy },
       proxyId: source.proxyId,
       fingerprint: { ...source.fingerprint },
       targetOs: source.fingerprint.targetOs
@@ -278,13 +234,16 @@ export class ProfileStore {
   private load() {
     try {
       const rawProfiles = fs.existsSync(this.profilesFile)
-        ? JSON.parse(fs.readFileSync(this.profilesFile, 'utf8')) as Array<BrowserProfile & { platform?: string }>
+        ? JSON.parse(fs.readFileSync(this.profilesFile, 'utf8')) as Array<BrowserProfile & { platform?: string; proxy?: unknown }>
         : []
-      // 迁移历史字段：早期 profile 上有业务 `platform` 标签（amazon/shopify 等），
-      // 现在已经没有这个概念，加载时清掉。同时 startUrl 在历史数据里可能是 `'https://www.google.com'`
-      // 这种"默认值"——不动它（用户主动改才生效），但下次他清空就真的能清空。
+      // 迁移历史字段:
+      //   - 早期 profile 上有业务 `platform` 标签(amazon/shopify 等),现在已经没有这个概念
+      //   - inline `proxy` 字段在 Phase 1c 删除,真源迁移到 ProxyStore + proxyId
+      // 都通过解构丢弃,下次 save() 写回去时不再出现这两个字段。
+      // startUrl 在历史数据里可能是 'https://www.google.com' 这种"默认值"——不动它
+      // (用户主动改才生效),但下次他清空就真的能清空。
       const normalizedProfiles = rawProfiles.map((raw) => {
-        const { platform: _legacyPlatform, ...rest } = raw
+        const { platform: _legacyPlatform, proxy: _legacyProxy, ...rest } = raw
         return {
           ...rest,
           enabledPluginIds: rest.enabledPluginIds ?? [],
