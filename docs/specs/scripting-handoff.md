@@ -47,10 +47,10 @@
   - 新增 IPC `scripts:activeRuns` 和 `scripts:activeByProfile`
   - `scripts:run` 处理器：catch 到 `ProfileBusyError` 时回 `{ ok:false, error: { code:'PROFILE_BUSY', message, occupiedBy } }`
 - `electron/preload.ts` + `src/vite-env.d.ts`：扩 `scripts.run` 错误类型；新增 `scripts.activeRuns()` / `scripts.activeByProfile()`
-- `src/components/ActiveRunsButton.tsx`（新）：Header 抽屉 + 1s 心跳实时秒数 + Stop / Open script
+- `src/components/active-runs-button/index.tsx`（新）：Header 抽屉 + 1s 心跳实时秒数 + Stop / Open script
 - `src/App.tsx`：`activeRuns` state + 启动拉一次 + 订阅 `'active-changed'`；Header 注入 `ActiveRunsButton`；`ProfilesPanel` 注入 `scriptingByProfileId` 和 SCRIPTING 徽章
-- `src/components/ScriptsView.tsx`：`activeRuns` 透传
-- `src/components/ScriptRunPanel.tsx`：
+- `src/views/scripts/index.tsx`：`activeRuns` 透传
+- `src/views/scripts/components/script-run-panel/index.tsx`：
   - liveRuns 跨脚本切换保留（按 `scriptId` 过滤显示）
   - PROFILE_BUSY 失败时本地化文案带占用脚本名
   - `ProfileSelector` chip 灰显 + tooltip 显示占用脚本名
@@ -126,21 +126,35 @@ electron/
 └── types.ts                        Script / ScriptRun / ScriptDraft / BrowserProfile（无 platform、startUrl 可选）
 
 src/
-├── App.tsx                         View = 'profiles' | 'settings' | 'scripts'；列表无 Platform 列
-├── main.tsx                        React 入口
+├── App.tsx                         路由编排 + 业务函数;view 派生自 react-router pathname
+├── main.tsx                        React 入口,顶层包 HashRouter
 ├── vite-env.d.ts                   window.registry.scripts.* 类型
+├── hooks/
+│   ├── useAppData.ts               profiles/plugins/proxies/scripts/activeRuns 加载 + 订阅
+│   ├── useTheme.ts                 主题偏好 + system 监听
+│   └── useLocale.ts                语言偏好 + document.lang 同步
 ├── lib/
 │   ├── i18n.ts                     interpolate
 │   ├── utils.ts                    cn()
-│   ├── monacoSetup.ts              MonacoEnvironment.getWorker 钩子
-│   └── scriptTypings.ts            合并版 ambient d.ts（auto-registry + puppeteer-core 真包 + axios/dayjs/zod/cheerio stub）
-└── components/
-    ├── ScriptsView.tsx             侧栏列表 + DetailPane 上下分屏（编辑器 60% / 运行面板 40%）
-    ├── ScriptEditor.tsx            Monaco 编辑器 + import 完成度 + 类型补全
-    ├── ScriptRunPanel.tsx          运行面板：多选 profile / 并发 run / 实时日志 / Stop / Stop all / Clear finished
-    ├── ProfileFormDialog.tsx       新建/编辑环境（已无 Platform 字段；startUrl 可选 + 解释行）
-    ├── ProfileDetailsDialog.tsx    详情（已无 Platform 行）
-    └── ... 现有 SettingsView/KernelSetup/ConfirmDeleteDialog
+│   ├── monaco-setup.ts             MonacoEnvironment.getWorker 钩子
+│   └── script-typings.ts           合并版 ambient d.ts(auto-registry + puppeteer-core 真包 + axios/dayjs/zod/cheerio stub)
+├── components/
+│   ├── ui/                         shadcn 原子组件(button / dialog / split-pane / ...)
+│   ├── app-header/index.tsx        Header(品牌标 + 导航 tab + 主题 / 语言切换)
+│   ├── active-runs-button/index.tsx 全局活跃 run 抽屉
+│   ├── keep-alive/index.tsx        路由 KeepAlive(display:none 切换)
+│   ├── profile-form-dialog/        新建/编辑环境(只递 proxyId,无 inline 字段)
+│   ├── profile-details-dialog/index.tsx
+│   ├── confirm-delete-dialog/index.tsx
+│   ├── kernel-setup/index.tsx
+│   ├── proxy-form-dialog/index.tsx
+│   ├── proxy-batch-import-dialog/index.tsx
+│   └── proxy-select-field/index.tsx
+└── views/
+    ├── profiles/                   环境列表(toolbar / selection-bar / table 三块)
+    ├── scripts/                    脚本子系统(列表 + 详情 + 编辑器 + 运行面板)
+    ├── proxies/                    代理管理
+    └── settings/                   设置 / 内核
 ```
 
 ---
@@ -160,11 +174,11 @@ src/
 | 日志双通道 | SDK 只走 IPC（`[info/warn/error]`），用户 `console.log` 只走 stdout（`[stdout]`），两者不打架 | `bootstrap.ts` postLog |
 | 依赖策略 MVP | 固定内置：`puppeteer-core` `cheerio` `axios` `dayjs` `zod`。不搞白名单自装 | 已 install |
 | **CDP 反检测** | `puppeteer-core` 实际被 [bootstrap 劫持](../../electron/scripts/bootstrap.ts) 到 `rebrowser-puppeteer-core` — 用户脚本零感,SDK 内部直接 import rebrowser。规避 `Runtime.enable` 探测 | `bootstrap.ts` + `sdk/browser.ts` + [`anti-detection.md`](anti-detection.md) §4 |
-| UI 集成 | 主窗口加第三个 tab "Scripts"，与 Environments/Settings 并列 | `App.tsx` + `ScriptsView.tsx` |
-| **Monaco 单实例** | `loader.config({ monaco })` 让 `@monaco-editor/react` 用我们 import 的本地 monaco 而不是 CDN，否则 setCompilerOptions 配的是另一份实例 | `ScriptEditor.tsx` |
-| Monaco 类型源 | **合并版** ambient d.ts：把 auto-registry / puppeteer-core 真包 / axios / dayjs / zod / cheerio 全塞进**一份** extraLib 文件。跨文件 ambient import 不可靠 | `scriptTypings.ts` |
-| Monaco import 候选补全 | 自定义 completionItemProvider 在 `from '` / `import('` / `require('` 后弹 6 个内置包名 | `ScriptEditor.tsx` |
-| Monaco bundle 处理 | `vite.config.ts` manualChunks 拆 'monaco' chunk + Suspense 懒加载；worker 用 `?worker` 本地打 bundle；`fixedOverflowWidgets:true` 让 hover 不被父 overflow 裁切 | `vite.config.ts` + `monacoSetup.ts` + `ScriptEditor.tsx` |
+| UI 集成 | 主窗口加第三个 tab "Scripts"，与 Environments/Settings 并列 | `App.tsx` + `views/scripts/index.tsx` |
+| **Monaco 单实例** | `loader.config({ monaco })` 让 `@monaco-editor/react` 用我们 import 的本地 monaco 而不是 CDN，否则 setCompilerOptions 配的是另一份实例 | `views/scripts/components/script-editor/index.tsx` |
+| Monaco 类型源 | **合并版** ambient d.ts：把 auto-registry / puppeteer-core 真包 / axios / dayjs / zod / cheerio 全塞进**一份** extraLib 文件。跨文件 ambient import 不可靠 | `lib/script-typings.ts` |
+| Monaco import 候选补全 | 自定义 completionItemProvider 在 `from '` / `import('` / `require('` 后弹 6 个内置包名 | `views/scripts/components/script-editor/index.tsx` |
+| Monaco bundle 处理 | `vite.config.ts` manualChunks 拆 'monaco' chunk + Suspense 懒加载；worker 用 `?worker` 本地打 bundle；`fixedOverflowWidgets:true` 让 hover 不被父 overflow 裁切 | `vite.config.ts` + `lib/monaco-setup.ts` + `views/scripts/components/script-editor/index.tsx` |
 | **业务"平台"字段已删** | `BrowserProfile` 不再有 `platform: string`。原来的 amazon/shopify 等业务标签整个砍掉。`fingerprint.platform`（navigator.platform 值）保留 | 模型层 + UI |
 | **startUrl 仅首次启动** | profile 第一次启动时如果配了 startUrl 才打开；之后浏览器恢复上次会话。"首次"判定 = `<profilePath>/Default` 是否存在 | `main.ts isFirstLaunch` |
 | 脚本路径强制不开 startUrl | `ensureProfileRunningForScript` 传 `openStartUrl: false`，避免 startUrl 异步加载抢脚本 page.goto 的 tab | `main.ts` |

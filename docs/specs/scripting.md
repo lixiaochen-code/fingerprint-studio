@@ -218,10 +218,19 @@ electron/
 docs/specs/
 └── scripting.md                  # 本文件
 src/
-└── components/
-    ├── ScriptsView.tsx           # 脚本 tab 主视图（Phase 3）
-    ├── ScriptEditor.tsx          # Monaco 封装（Phase 3）
-    └── ScriptRunPanel.tsx        # 运行 / 日志（Phase 3）
+├── views/
+│   └── scripts/                  # 路由组件目录(Phase 3)
+│       ├── index.tsx             # 入口:侧栏 + 详情面板编排
+│       └── components/
+│           ├── script-list/      # 左侧脚本列表
+│           ├── script-detail-pane/    # 右侧编辑器 + 运行面板容器
+│           ├── script-editor/    # Monaco 封装
+│           ├── script-run-panel/ # 运行 / 日志(含 profile-selector / run-row 子组件)
+│           ├── create-script-dialog/  # 新建脚本对话框
+│           └── delete-script-dialog/  # 删除确认
+└── lib/
+    ├── monaco-setup.ts           # MonacoEnvironment.getWorker 钩子
+    └── script-typings.ts         # 合并版 ambient d.ts
 ```
 
 ## 9. 安全与限制

@@ -117,7 +117,7 @@ AUTO_REGISTRY_FINGERPRINT_MODE=extension pnpm dev
 | [electron/scripts/sdk/browser.ts](../../electron/scripts/sdk/browser.ts) | `import puppeteer from 'rebrowser-puppeteer-core'` |
 | [electron/scripts/sdk/types.ts](../../electron/scripts/sdk/types.ts) | `import type { Browser, Page } from 'rebrowser-puppeteer-core'` |
 | [electron/scripts/bootstrap.ts](../../electron/scripts/bootstrap.ts) | `installAutoRegistryModule` → `installModuleInterceptions`,合并劫持 `puppeteer-core` / `puppeteer` specifier → rebrowser 路径 |
-| [src/lib/scriptTypings.ts](../../src/lib/scriptTypings.ts) | 加 `declare module 'rebrowser-puppeteer-core' { export * from 'puppeteer-core' }`,Monaco 对两个 specifier 都有补全 |
+| [src/lib/script-typings.ts](../../src/lib/script-typings.ts) | 加 `declare module 'rebrowser-puppeteer-core' { export * from 'puppeteer-core' }`,Monaco 对两个 specifier 都有补全 |
 
 ### 用户脚本侧无感
 
@@ -192,9 +192,12 @@ electron/
 
 src/
 ├── lib/
-│   ├── fingerprintModeLabels.ts   # 5 个 mode × en/zh 的单一 i18n 源
-│   └── scriptTypings.ts           # Monaco 类型:declare module 'rebrowser-puppeteer-core'
-└── App.tsx                        # FingerprintBadge + Header tooltip 引用新字典
+│   ├── fingerprint-mode-labels.ts # 5 个 mode × en/zh 的单一 i18n 源
+│   └── script-typings.ts          # Monaco 类型:declare module 'rebrowser-puppeteer-core'
+├── components/
+│   └── app-header/index.tsx       # Header tooltip 引用 fingerprint-mode-labels
+└── views/
+    └── profiles/components/fingerprint-badge/index.tsx  # 同上
 ```
 
 ## 8. 已知风险与未来改进
