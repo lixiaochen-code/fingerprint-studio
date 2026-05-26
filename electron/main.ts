@@ -6,7 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } fr
 import { extractFull } from 'node-7z'
 import sevenBin from '7zip-bin'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, ProxyDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
+import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, Proxy, ProxyDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
 import { hostOs } from './fingerprint'
 import {
   KernelMissingError,
@@ -25,6 +25,7 @@ import { ScriptRuntimeManager, ProfileBusyError, type ScriptRuntimeEvent } from 
 import { runStartupJanitor } from './scripts/janitor'
 import { testProxy } from './proxyTest'
 import { testProxy as testProxyV2 } from './proxies/test'
+import type { ProxyAuthCredentials } from './proxyAuth'
 import { ProxyStore } from './proxies/store'
 import { parseProxyBatch } from './proxies/parser'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
@@ -66,8 +67,29 @@ function runtimeStatus(): BrowserRuntimeStatus[] {
   }))
 }
 
-function proxyUrl(profile: BrowserProfile) {
-  return `http://${profile.proxy.host}:${profile.proxy.port}`
+function resolveProxy(profile: BrowserProfile): Proxy | undefined {
+  // proxyId === null 是用户显式选择"无代理 / 走系统网络"。
+  // proxyId === string 但 ProxyStore 里查不到 → 数据漂移(代理被删了 profile 没更),
+  // 退回无代理而不是用残留 inline 字段——后者会让"已删除的代理"重新生效。
+  if (!profile.proxyId) return undefined
+  return proxyStore.get(profile.proxyId)
+}
+
+function proxyUrlForLaunch(proxy: Proxy | undefined): string | undefined {
+  if (!proxy) return undefined
+  // Chromium --proxy-server 接受 http / https / socks4 / socks5 四种 scheme,
+  // 与 ProxyStore 的 ProxyScheme 完全一致,直接拼即可。
+  return `${proxy.scheme}://${proxy.host}:${proxy.port}`
+}
+
+function proxyAuthFor(proxy: Proxy | undefined): ProxyAuthCredentials | undefined {
+  if (!proxy || !proxy.username || !proxy.password) return undefined
+  return {
+    host: proxy.host,
+    port: proxy.port,
+    username: proxy.username,
+    password: proxy.password
+  }
 }
 
 async function runtimeInfo(): Promise<RuntimeInfo> {
@@ -272,12 +294,13 @@ async function launchProfile(profile: BrowserProfile, options: { openStartUrl?: 
     ? profile.startUrl
     : undefined
 
+  const proxy = resolveProxy(profile)
   const args = buildLaunchArgs(
     profile,
     selection,
     activePlugins.map((plugin) => plugin.path),
-    proxyUrl(profile),
-    { initialUrl }
+    proxyUrlForLaunch(proxy),
+    { initialUrl, proxyAuth: proxyAuthFor(proxy) }
   )
 
   enableExtensionDeveloperMode(profile.profilePath)

@@ -80,6 +80,7 @@ type Translations = {
   refresh: string
   environment: string
   proxy: string
+  proxyNone: string
   fingerprint: string
   createdAt: string
   status: string
@@ -133,6 +134,7 @@ const translations: Record<Locale, Translations> = {
     refresh: 'REFRESH',
     environment: 'Environment',
     proxy: 'Proxy',
+    proxyNone: 'No proxy',
     fingerprint: 'Fingerprint',
     createdAt: 'Created',
     status: 'Status',
@@ -184,6 +186,7 @@ const translations: Record<Locale, Translations> = {
     refresh: '刷新',
     environment: '环境',
     proxy: '代理',
+    proxyNone: '无代理',
     fingerprint: '指纹',
     createdAt: '创建时间',
     status: '状态',
@@ -397,10 +400,21 @@ export function App() {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!needle) return profiles
-    return profiles.filter((profile) =>
-      [profile.name, profile.notes, profile.proxy.host, profile.startUrl ?? ''].join(' ').toLowerCase().includes(needle)
-    )
-  }, [profiles, query])
+    // 代理搜索从 ProxyStore 真源派生:支持搜代理"名字" + "host:port",
+    // 命中即视为该 profile 的代理匹配。inline profile.proxy 字段在 Phase 1c 之前是兼容
+    // 镜像,proxyId=null 时为空,搜也搜不到,所以这里直接用 proxies 表查。
+    const proxyById = new Map(proxies.map((proxy) => [proxy.id, proxy] as const))
+    return profiles.filter((profile) => {
+      const proxy = profile.proxyId ? proxyById.get(profile.proxyId) : undefined
+      const proxySearchable = proxy
+        ? `${proxy.name} ${proxy.host}:${proxy.port}`
+        : ''
+      return [profile.name, profile.notes, proxySearchable, profile.startUrl ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(needle)
+    })
+  }, [profiles, proxies, query])
 
   const selectedProfiles = useMemo(
     () => profiles.filter((profile) => selectedIds.has(profile.id)),
@@ -579,6 +593,7 @@ export function App() {
           onQueryChange={setQuery}
           onReload={() => void load()}
           filtered={filtered}
+          proxies={proxies}
           runningIds={runningIds}
           busyId={busyId}
           selectedIds={selectedIds}
@@ -609,6 +624,7 @@ export function App() {
           theme={resolvedTheme}
           scripts={scripts}
           profiles={profiles}
+          proxies={proxies}
           runningProfileIds={runningIds}
           activeRuns={activeRuns}
           selectedScriptId={selectedScriptId}
@@ -666,6 +682,7 @@ export function App() {
         open={detailsIds.length > 0}
         profiles={profiles.filter((profile) => detailsIds.includes(profile.id))}
         plugins={plugins}
+        proxies={proxies}
         locale={locale}
         onClose={() => setDetailsIds([])}
       />
@@ -747,6 +764,7 @@ function ProfilesPanel({
   onQueryChange,
   onReload,
   filtered,
+  proxies,
   runningIds,
   busyId,
   selectedIds,
@@ -773,6 +791,11 @@ function ProfilesPanel({
   onQueryChange: (value: string) => void
   onReload: () => void
   filtered: BrowserProfile[]
+  /**
+   * ProxyStore 真源。表格"代理"列 + 行 tooltip 都按 profile.proxyId 查这里。
+   * inline profile.proxy 字段已是 deprecated 兼容镜像,proxyId=null 时为空,不能再用。
+   */
+  proxies: Proxy[]
   runningIds: Set<string>
   busyId: string | undefined
   selectedIds: Set<string>
@@ -905,6 +928,11 @@ function ProfilesPanel({
                   const checked = selectedIds.has(profile.id)
                   const occupyingRun = scriptingByProfileId.get(profile.id)
                   const occupyingScriptName = occupyingRun ? scriptNameById.get(occupyingRun.scriptId) : undefined
+                  // 代理显示从 ProxyStore 真源派生:proxyId=null → 显示"无代理";有 id 但
+                  // ProxyStore 找不到(代理被删了 profile 没更)→ 也显示"无代理",避免误导。
+                  const proxy = profile.proxyId
+                    ? proxies.find((entry) => entry.id === profile.proxyId)
+                    : undefined
                   return (
                     <tr key={profile.id} className="group border-b border-border transition-colors hover:bg-muted/30">
                       <td className="p-4 align-middle">
@@ -920,7 +948,7 @@ function ProfilesPanel({
                       </td>
                       <td className="p-4 align-middle">
                         <code className="text-[11px] text-accent font-mono">
-                          {profile.proxy.host}:{profile.proxy.port}
+                          {proxy ? `${proxy.host}:${proxy.port}` : t.proxyNone}
                         </code>
                       </td>
                       <td className="p-4 align-middle">

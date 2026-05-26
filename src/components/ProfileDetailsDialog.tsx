@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { interpolate } from '@/lib/i18n'
-import type { BrowserPlugin, BrowserProfile } from '../../electron/types'
+import type { BrowserPlugin, BrowserProfile, Proxy } from '../../electron/types'
 
 type Locale = 'en' | 'zh'
 
@@ -20,6 +20,8 @@ const labels = {
     startUrl: 'Start URL',
     proxyUrl: 'Endpoint',
     proxyAuth: 'Auth',
+    proxyName: 'Name',
+    proxyNone: 'No proxy (system network)',
     targetOs: 'Target OS',
     userAgent: 'User Agent',
     language: 'Language',
@@ -59,6 +61,8 @@ const labels = {
     startUrl: '启动网址',
     proxyUrl: '地址',
     proxyAuth: '认证',
+    proxyName: '名称',
+    proxyNone: '无代理（系统网络）',
     targetOs: '目标系统',
     userAgent: 'User Agent',
     language: '语言',
@@ -92,11 +96,12 @@ export type ProfileDetailsDialogProps = {
   open: boolean
   profiles: BrowserProfile[]
   plugins: BrowserPlugin[]
+  proxies: Proxy[]
   locale: Locale
   onClose: () => void
 }
 
-export function ProfileDetailsDialog({ open, profiles, plugins, locale, onClose }: ProfileDetailsDialogProps) {
+export function ProfileDetailsDialog({ open, profiles, plugins, proxies, locale, onClose }: ProfileDetailsDialogProps) {
   const t = labels[locale]
   const single = profiles.length === 1
   const title = single
@@ -113,14 +118,33 @@ export function ProfileDetailsDialog({ open, profiles, plugins, locale, onClose 
     >
       <div className="space-y-6">
         {profiles.map((profile) => (
-          <ProfileBlock key={profile.id} profile={profile} plugins={plugins} t={t} showName={!single} />
+          <ProfileBlock
+            key={profile.id}
+            profile={profile}
+            plugins={plugins}
+            proxies={proxies}
+            t={t}
+            showName={!single}
+          />
         ))}
       </div>
     </Dialog>
   )
 }
 
-function ProfileBlock({ profile, plugins, t, showName }: { profile: BrowserProfile; plugins: BrowserPlugin[]; t: Translations; showName: boolean }) {
+function ProfileBlock({
+  profile,
+  plugins,
+  proxies,
+  t,
+  showName
+}: {
+  profile: BrowserProfile
+  plugins: BrowserPlugin[]
+  proxies: Proxy[]
+  t: Translations
+  showName: boolean
+}) {
   const enabledPlugins = profile.enabledPluginIds
     .map((id) => plugins.find((plugin) => plugin.id === id))
     .filter((plugin): plugin is BrowserPlugin => Boolean(plugin))
@@ -139,8 +163,24 @@ function ProfileBlock({ profile, plugins, t, showName }: { profile: BrowserProfi
           <Row label={t.notes} value={profile.notes || t.none} />
         </Group>
         <Group title={t.sectionProxy}>
-          <Row label={t.proxyUrl} value={`${profile.proxy.host}:${profile.proxy.port}`} />
-          <Row label={t.proxyAuth} value={profile.proxy.username ? `${profile.proxy.username} : ••••` : t.none} />
+          {(() => {
+            // proxyId 是真源:null = 用户主动选无代理;字符串 = 引用 ProxyStore 条目。
+            // 字符串但 proxies 找不到 = 引用悬空(代理被删了 profile 没更新),按"无代理"显示
+            // 是更安全的 fallback —— 不展示残留的 inline 字段,避免误导。
+            const proxy = profile.proxyId
+              ? proxies.find((p) => p.id === profile.proxyId)
+              : undefined
+            if (!proxy) {
+              return <Row label={t.proxyUrl} value={t.proxyNone} />
+            }
+            return (
+              <>
+                <Row label={t.proxyName} value={proxy.name} />
+                <Row label={t.proxyUrl} value={`${proxy.scheme}://${proxy.host}:${proxy.port}`} />
+                <Row label={t.proxyAuth} value={proxy.username ? `${proxy.username} : ••••` : t.none} />
+              </>
+            )
+          })()}
         </Group>
         <Group title={t.sectionFingerprint} className="md:col-span-2">
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 lg:grid-cols-3">

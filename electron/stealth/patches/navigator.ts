@@ -4,8 +4,16 @@
  * 关键覆盖点:
  * - navigator.webdriver — 必须为 false(headful Chrome 默认 undefined,但我们 stub 成 false
  *   是更稳的选择;一些站点会同时检测 'undefined' 和 'true'/'false',false 最常见且安全)
- * - userAgent / appVersion / language / languages / platform 等 — 与 payload 对齐
+ * - language / languages / hardwareConcurrency / deviceMemory / maxTouchPoints / DNT —
+ *   这些是"可以安全伪造"的字段:它们不与 Chromium 内部 client hints / sec-ch-ua-* 交叉校验,
+ *   每个 profile 不同也无法被识破。维持一份 payload-driven 差异化指纹的核心承重者。
  * - plugins / mimeTypes — 真实 Chrome 至少有 5 个 plugin(PDF Viewer 系列),空数组立刻识破
+ *
+ * **故意不 hook 的字段**:
+ * - userAgent / appVersion / platform — Phase 1d 起 chromium 路径放弃 OS 维度伪装,
+ *   navigator.userAgent 让 Chromium 走默认值,与 sec-ch-ua-platform / userAgentData
+ *   天然一致。hook 这些字段反而会和 client hints 矛盾,触发 Turnstile 600010。
+ *   跨 OS 伪装走 cloak / itbrowser 内核(它们在 Chromium 编译期改了 client hints 来源)。
  *
  * 注:
  * - 改 prototype 而不是 instance,确保 iframe 内 (通过 iframe patch 同步) 也生效
@@ -17,16 +25,16 @@ export const NAVIGATOR_PATCH = `
   const nav = payload.navigator || {};
 
   helper.defineGetter(navProto, 'webdriver', () => false);
-  if (nav.userAgent) {
-    helper.defineGetter(navProto, 'userAgent', () => nav.userAgent);
-    helper.defineGetter(navProto, 'appVersion', () => String(nav.userAgent).replace(/^Mozilla\\//, ''));
-  }
+  // userAgent / appVersion / platform 不再 hook ——
+  //   - 与 navigator.userAgentData / sec-ch-ua-* HTTP header 来自的真实内核值天然一致
+  //   - 任何 hook 都会与 client hints 矛盾,被 Cloudflare/Turnstile 直接识破
   if (nav.language) helper.defineGetter(navProto, 'language', () => nav.language);
   if (nav.languages) {
     const frozen = Object.freeze([...nav.languages]);
     helper.defineGetter(navProto, 'languages', () => frozen);
   }
-  if (nav.platform) helper.defineGetter(navProto, 'platform', () => nav.platform);
+  // platform 不再 hook —— 同 userAgent/appVersion 一样,任何替换都会与
+  // sec-ch-ua-platform HTTP header 矛盾。让 navigator.platform 走 Chromium 默认值。
   if (typeof nav.hardwareConcurrency === 'number') {
     helper.defineGetter(navProto, 'hardwareConcurrency', () => nav.hardwareConcurrency);
   }

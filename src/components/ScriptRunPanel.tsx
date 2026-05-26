@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip } from '@/components/ui/tooltip'
 import { interpolate } from '@/lib/i18n'
-import type { BrowserProfile, Script, ScriptRun, ScriptRunStatus } from '../../electron/types'
+import type { BrowserProfile, Proxy, Script, ScriptRun, ScriptRunStatus } from '../../electron/types'
 import type { ScriptRuntimeEvent } from '../../electron/scripts/runtime'
 
 type Locale = 'en' | 'zh'
@@ -32,6 +32,7 @@ type Translations = {
   durationSec: string
   clear: string
   filterAll: string
+  proxyNone: string
 }
 
 const labels: Record<Locale, Translations> = {
@@ -56,7 +57,8 @@ const labels: Record<Locale, Translations> = {
     profileBusyUnknown: 'This environment is already running another script. Stop it first or pick another environment.',
     durationSec: '{{seconds}}s',
     clear: 'Clear finished',
-    filterAll: 'All'
+    filterAll: 'All',
+    proxyNone: 'No proxy'
   },
   zh: {
     panelTitle: '运行',
@@ -79,7 +81,8 @@ const labels: Record<Locale, Translations> = {
     profileBusyUnknown: '该环境正在运行另一个脚本，请先停止它或换一个环境。',
     durationSec: '{{seconds}} 秒',
     clear: '清理已结束',
-    filterAll: '全部'
+    filterAll: '全部',
+    proxyNone: '无代理'
   }
 }
 
@@ -133,6 +136,12 @@ export type ScriptRunPanelProps = {
   /** 全部脚本，用来在 PROFILE_BUSY 错误里把占用的 scriptId 换成可读名字 */
   scripts: Script[]
   profiles: BrowserProfile[]
+  /**
+   * ProxyStore 真源。tooltip 里显示代理 host:port 时按 profile.proxyId 查这里;
+   * 不传或 proxyId 命不中 → 显示"无代理"。inline profile.proxy 字段已是 deprecated
+   * 兼容镜像,在"无代理"语义下为空,不能再当显示来源用。
+   */
+  proxies: Proxy[]
   runningProfileIds: Set<string>
   /**
    * 全局活跃 run 列表。用来：
@@ -156,7 +165,7 @@ export type ScriptRunPanelProps = {
  * - profile 多选：复用现有 BrowserProfile 列表；勾上的并发 run
  * - "Stop all" 仅停本面板范围内的 run（不调 stopAll IPC，那是全局清理）
  */
-export function ScriptRunPanel({ script, scripts, profiles, runningProfileIds, activeRuns, locale, onGoToEnvironments }: ScriptRunPanelProps) {
+export function ScriptRunPanel({ script, scripts, profiles, proxies, runningProfileIds, activeRuns, locale, onGoToEnvironments }: ScriptRunPanelProps) {
   const t = labels[locale]
   // selectedProfileIds 是"为当前脚本准备的下次 Run 选区"，每个脚本独立 —— 切脚本时复位。
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set())
@@ -372,6 +381,7 @@ export function ScriptRunPanel({ script, scripts, profiles, runningProfileIds, a
 
       <ProfileSelector
         profiles={profiles}
+        proxies={proxies}
         runningProfileIds={runningProfileIds}
         selected={selectedProfileIds}
         onToggle={toggleProfile}
@@ -403,6 +413,7 @@ export function ScriptRunPanel({ script, scripts, profiles, runningProfileIds, a
 
 function ProfileSelector({
   profiles,
+  proxies,
   runningProfileIds,
   selected,
   onToggle,
@@ -415,6 +426,7 @@ function ProfileSelector({
   scriptNameById
 }: {
   profiles: BrowserProfile[]
+  proxies: Proxy[]
   runningProfileIds: Set<string>
   selected: Set<string>
   onToggle: (id: string, checked: boolean) => void
@@ -456,10 +468,15 @@ function ProfileSelector({
           const occupiedBySelf = occupy && occupy.scriptId === currentScriptId
           const isDisabled = Boolean(occupy)
           const occupyingScriptName = occupy ? scriptNameById.get(occupy.scriptId) : undefined
+          // 代理显示从 ProxyStore 真源派生:proxyId=null / 找不到都退回"无代理"。
+          const proxy = profile.proxyId
+            ? proxies.find((entry) => entry.id === profile.proxyId)
+            : undefined
+          const proxyLabel = proxy ? `${proxy.host}:${proxy.port}` : t.proxyNone
           const tooltipContent = (
             <div className="space-y-0.5">
               <div className="font-bold">{profile.name}</div>
-              <div className="font-mono text-[10px] text-muted-foreground">{profile.proxy.host}:{profile.proxy.port}</div>
+              <div className="font-mono text-[10px] text-muted-foreground">{proxyLabel}</div>
               {occupiedByOther && (
                 <div className="font-mono text-[10px] text-amber-400">
                   {interpolate(t.profileBusy, { script: occupyingScriptName ?? '?' })}

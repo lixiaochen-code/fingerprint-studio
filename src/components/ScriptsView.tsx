@@ -7,7 +7,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { SplitPane } from '@/components/ui/SplitPane'
 import { interpolate } from '@/lib/i18n'
 import { ScriptRunPanel } from './ScriptRunPanel'
-import type { BrowserProfile, Script, ScriptDraft, ScriptRun, ScriptSource } from '../../electron/types'
+import type { BrowserProfile, Proxy, Script, ScriptDraft, ScriptRun, ScriptSource } from '../../electron/types'
 
 // 懒加载：Monaco 是 4MB 级 bundle，只有进入 Scripts 视图后才需要。
 // 配合 vite.config.ts 里的 manualChunks 把它拆成独立 'monaco' chunk。
@@ -121,6 +121,8 @@ export type ScriptsViewProps = {
   theme: Theme
   scripts: Script[]
   profiles: BrowserProfile[]
+  /** 透传给 ScriptRunPanel,用于 profile chip tooltip 里展示真实代理 host:port */
+  proxies: Proxy[]
   runningProfileIds: Set<string>
   /** 全局活跃 run 列表，用于 chip 灰显被其它脚本占用的 profile */
   activeRuns?: ScriptRun[]
@@ -133,7 +135,7 @@ export type ScriptsViewProps = {
 }
 
 export function ScriptsView(props: ScriptsViewProps) {
-  const { locale, theme, scripts, profiles, runningProfileIds, activeRuns, selectedScriptId, onSelect, onCreate, onRemove, onGoToEnvironments } = props
+  const { locale, theme, scripts, profiles, proxies, runningProfileIds, activeRuns, selectedScriptId, onSelect, onCreate, onRemove, onGoToEnvironments } = props
   const t = labels[locale]
 
   const [createOpen, setCreateOpen] = useState<ScriptSource | undefined>()
@@ -213,6 +215,7 @@ export function ScriptsView(props: ScriptsViewProps) {
             locale={locale}
             theme={theme}
             profiles={profiles}
+            proxies={proxies}
             runningProfileIds={runningProfileIds}
             activeRuns={activeRuns}
             onDelete={() => setPendingDelete(selected)}
@@ -281,6 +284,7 @@ function DetailPane({
   locale,
   theme,
   profiles,
+  proxies,
   runningProfileIds,
   activeRuns,
   onDelete,
@@ -292,6 +296,7 @@ function DetailPane({
   locale: Locale
   theme: Theme
   profiles: BrowserProfile[]
+  proxies: Proxy[]
   runningProfileIds: Set<string>
   activeRuns?: ScriptRun[]
   onDelete: () => void
@@ -346,6 +351,7 @@ function DetailPane({
             script={script}
             scripts={scripts}
             profiles={profiles}
+            proxies={proxies}
             runningProfileIds={runningProfileIds}
             activeRuns={activeRuns}
             locale={locale}

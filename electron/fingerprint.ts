@@ -84,12 +84,26 @@ function userAgentFor(osToken: string) {
   return `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion()} Safari/537.36`
 }
 
-const TARGET_OPTIONS: TargetOs[] = ['windows', 'mac', 'linux']
-
-export function resolveTargetOs(choice: TargetOsChoice | undefined, fallback: TargetOs): TargetOs {
-  if (choice === 'windows' || choice === 'mac' || choice === 'linux') return choice
-  if (choice === 'random') return pick(TARGET_OPTIONS)
-  return fallback
+/**
+ * Phase 1d 起 `targetOs` 行为锁死到宿主 OS:UI 上"目标系统"下拉框保留是兼容历史
+ * 字段,但**实际启动时**永远回到宿主 OS。
+ *
+ * 为什么:跨 OS 伪装这条路对 Cloudflare/Turnstile 已经死了 ——
+ *   - `--user-agent` flag 即便值与真实内核完全对齐,Turnstile 仍能从 client hints
+ *     (`navigator.userAgentData.getHighEntropyValues`)读出真实平台/版本号矛盾
+ *   - sec-ch-ua-platform / sec-ch-ua-platform-version HTTP header 是 Chromium
+ *     从内核硬编码读的,任何 CLI flag 都改不了
+ *   - WebGL / 字体 / 时区与 OS 也强相关,inject 层盖不全
+ *
+ * 因此整个反检测策略转向"OS 维度真实,容器维度差异化":每个 profile 之间靠 viewport /
+ * Canvas/Audio noise / hardwareConcurrency / deviceMemory / DPR / WebGL renderer
+ * (同 GPU 家族不同 ANGLE 包装) / 字体 / 时区 / 语言 这些字段做差异化,而不是装成另一种 OS。
+ *
+ * 用户在 UI 选"Windows"在 Mac 上跑 → 我们尊重历史输入但实际按 Mac 跑,且 UI 应该展示提示。
+ * 用户选"random" → 也只在宿主 OS 内做差异(实质上等价于"宿主 OS")。
+ */
+export function resolveTargetOs(_choice: TargetOsChoice | undefined, _fallback: TargetOs): TargetOs {
+  return defaultTargetOs()
 }
 
 export function hostOs(): HostOs {
@@ -339,18 +353,11 @@ const LEGACY_INJECT = `
 `
 
 /**
- * 把传入 UA 字符串里的 `Chrome/<x.x.x.x>` 段替换成真实安装的内核版本。
- *
- * 痛点:profile.fingerprint.userAgent 是 profile 创建那一刻随机生成的,但实际跑的
- * Chromium 二进制版本是另一回事 —— 用户随时可能更新内核。两者一旦不一致,Cloudflare
- * 会拿 UA vs `navigator.userAgentData.brands` / `sec-ch-ua` 做交叉校验直接判 bot;
- * 即便交叉校验没触发,Turnstile compat 检查也会直接读 UA 字符串里的 Chrome 版本号决定
- * "supported / unsupported"。
- *
- * 策略:启动时把 selection.version(从已安装 kernel 探测出的真实版本)切进 UA。
- * kernel 没安装或版本号格式异常时静默回退到原 UA。
+ * @deprecated Phase 1d 起 chromium 路径不再传 `--user-agent`,所以也不再需要在启动时
+ * 把 profile.fingerprint.userAgent 对齐到真实内核版本。保留实现仅供后续可能的 itbrowser /
+ * cloak 内核侧 fingerprint payload 写盘时复用,目前不在调用链中。
  */
-export function alignUserAgentWithKernel(userAgent: string, kernelVersion: string | undefined): string {
+function alignUserAgentWithKernel(userAgent: string, kernelVersion: string | undefined): string {
   if (!kernelVersion) return userAgent
   // 真实版本至少要形如 a.b.c.d(Chrome for Testing 用满四段)。Chromium 老快照号
   // (纯数字 build id)和 cloak 自定义版本号不在此覆盖,免得改坏。

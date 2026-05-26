@@ -17,8 +17,19 @@ import type { BrowserProfile } from './types'
 
 const EXTENSION_DIR_NAME = 'auto-registry-proxy-auth-extension'
 
-export function proxyAuthRequired(profile: BrowserProfile): boolean {
-  return Boolean(profile.proxy.username && profile.proxy.password)
+/**
+ * 主进程把 ProxyStore 里的真值传进来 —— 不再从 profile.proxy 这条 deprecated 派生路径取,
+ * 否则当用户选"无代理"(proxyId=null)时,inline 字段还残留旧 host:port,会误以为要鉴权。
+ */
+export interface ProxyAuthCredentials {
+  host: string
+  port: number
+  username?: string
+  password?: string
+}
+
+export function proxyAuthRequired(credentials: ProxyAuthCredentials | undefined): boolean {
+  return Boolean(credentials && credentials.username && credentials.password)
 }
 
 export function clearProxyAuthExtension(profile: BrowserProfile): void {
@@ -36,9 +47,16 @@ export function clearProxyAuthExtension(profile: BrowserProfile): void {
  * caller can append it to --load-extension. Returns undefined when credentials are absent,
  * and also cleans up any previously generated extension directory to avoid leaking stale
  * credentials after the user clears the auth fields.
+ *
+ * `credentials` 是当前启动应当使用的代理凭据(host/port 用来匹配 onAuthRequired 时的来源,
+ * 但因为 isProxy 标志已经够用,host/port 主要是给扩展自己留个引用)。`undefined` = 无代理,
+ * 直接清掉旧扩展并返回。
  */
-export function ensureProxyAuthExtension(profile: BrowserProfile): string | undefined {
-  if (!proxyAuthRequired(profile)) {
+export function ensureProxyAuthExtension(
+  profile: BrowserProfile,
+  credentials: ProxyAuthCredentials | undefined
+): string | undefined {
+  if (!proxyAuthRequired(credentials)) {
     clearProxyAuthExtension(profile)
     return undefined
   }
@@ -59,18 +77,18 @@ export function ensureProxyAuthExtension(profile: BrowserProfile): string | unde
     }
   }
 
-  const credentials = {
-    host: profile.proxy.host,
-    port: profile.proxy.port,
-    username: profile.proxy.username,
-    password: profile.proxy.password
+  const credentialsPayload = {
+    host: credentials!.host,
+    port: credentials!.port,
+    username: credentials!.username,
+    password: credentials!.password
   }
 
   // Chromium can fire onAuthRequired multiple times for the same request if we keep handing
   // it the same bad credentials; the pendingRequests guard stops us from auth-looping and
   // eating the user's session minutes.
   const background = `
-const CREDENTIALS = ${JSON.stringify(credentials)};
+const CREDENTIALS = ${JSON.stringify(credentialsPayload)};
 const pendingRequests = new Set();
 
 chrome.webRequest.onAuthRequired.addListener(

@@ -7,9 +7,15 @@ import { quarantineCorruptFile, writeJsonAtomic } from './persistence'
 import { ProxyStore } from './proxies/store'
 import { migrateProfilesToProxyStore, type MigratableProfile } from './proxies/migration'
 
-const DEFAULT_PROXY: ProxyConfig = {
-  host: '127.0.0.1',
-  port: 7890
+/**
+ * 旧 inline proxy 字段在 Phase 1c 之前还得保留(类型 + 兼容老 UI),但**真源**已经
+ * 迁到 ProxyStore + profile.proxyId。这里的"空代理占位"专门用于 proxyId=null 时
+ * 写回 inline 字段的兜底,避免外部读到 NaN/undefined 造成显示错乱。UI 列表/详情应该
+ * 直接读 proxies 列表,不要再依赖 inline。
+ */
+const EMPTY_INLINE_PROXY: ProxyConfig = {
+  host: '',
+  port: 0
 }
 
 function systemLocale() {
@@ -80,24 +86,52 @@ export class ProfileStore {
     const existing = draft.id ? this.profiles.find((profile) => profile.id === draft.id) : undefined
     const profileId = existing?.id ?? id()
 
-    // If the draft provides a proxy object at all, treat its auth fields as authoritative
-    // (including emptying them); only fall back to existing when the draft omits proxy
-    // entirely. This lets users remove previously saved credentials.
-    const draftProxy = draft.proxy
-    const existingProxy = existing?.proxy
-    const normalizedUsername = draftProxy
-      ? (draftProxy.username?.trim() || undefined)
-      : existingProxy?.username
-    const normalizedPassword = draftProxy
-      ? (draftProxy.password || undefined) // do NOT trim — passwords may have leading/trailing spaces
-      : existingProxy?.password
+    // 代理决议分两步:
+    //   1. 先决定 proxyId(真源):
+    //      - draft 显式带 proxyId(Phase 1c UI)→ 直接采用,null 也接受
+    //      - draft 仅带 inline proxy 输入(老 UI 兼容路径)→ 走 ProxyStore.findOrCreateFromLegacyInline
+    //      - 全空 → 保留 existing.proxyId,默认 null(无代理)
+    //   2. 再据 proxyId 镜像出 inline `proxy` 字段(Phase 1c 之前类型上必填):
+    //      - proxyId=null → EMPTY_INLINE_PROXY,这样"无代理"语义透到 inline 字段
+    //      - proxyId 命中 ProxyStore → 镜像 host/port/username/password
+    //      - proxyId 字符串但 ProxyStore 找不到(数据漂移)→ EMPTY_INLINE_PROXY
+    //
+    // 注意:渲染层应直接读 proxies 列表+proxyId,不要再依赖这里镜像出的 inline。
+    // 镜像保留只为 Phase 1c 之前未迁移的代码不崩。
+    const draftProxyInput = draft.proxy
+    const legacyInlineId = draftProxyInput && draftProxyInput.host?.trim()
+      ? this.proxyStore.findOrCreateFromLegacyInline({
+          host: draftProxyInput.host,
+          port: typeof draftProxyInput.port === 'number'
+            ? draftProxyInput.port
+            : Number(draftProxyInput.port),
+          username: draftProxyInput.username,
+          password: draftProxyInput.password
+        })
+      : undefined
 
-    const proxy: ProxyConfig = {
-      host: draftProxy?.host?.trim() || existingProxy?.host || DEFAULT_PROXY.host,
-      port: Number(draftProxy?.port || existingProxy?.port || DEFAULT_PROXY.port),
-      username: normalizedUsername,
-      password: normalizedPassword
+    let resolvedProxyId: string | null
+    if (Object.prototype.hasOwnProperty.call(draft, 'proxyId')) {
+      resolvedProxyId = draft.proxyId ?? null
+    } else if (legacyInlineId !== undefined) {
+      resolvedProxyId = legacyInlineId
+    } else if (existing?.proxyId !== undefined) {
+      resolvedProxyId = existing.proxyId
+    } else {
+      resolvedProxyId = null
     }
+
+    const proxy: ProxyConfig = (() => {
+      if (!resolvedProxyId) return { ...EMPTY_INLINE_PROXY }
+      const stored = this.proxyStore.get(resolvedProxyId)
+      if (!stored) return { ...EMPTY_INLINE_PROXY }
+      return {
+        host: stored.host,
+        port: stored.port,
+        username: stored.username,
+        password: stored.password
+      }
+    })()
 
     // startUrl 是可选字段。语义：
     //   - draft 带 startUrl key（即使是空字符串）→ 用 draft 的值（normalize 后可能 undefined）
@@ -114,7 +148,7 @@ export class ProfileStore {
       startUrl,
       enabledPluginIds: draft.enabledPluginIds ?? existing?.enabledPluginIds ?? [],
       proxy,
-      proxyId: this.resolveProxyId(draft, existing, proxy),
+      proxyId: resolvedProxyId,
       fingerprint: makeFingerprint({ ...existing?.fingerprint, ...draft.fingerprint }, draft.targetOs),
       profilePath: existing?.profilePath || path.join(profilesRoot(), profileId),
       createdAt: existing?.createdAt || now,
@@ -290,35 +324,6 @@ export class ProfileStore {
       quarantineCorruptFile(this.pluginsFile)
       this.plugins = []
     }
-  }
-
-  /**
-   * 决定一个 profile 最终保存时的 proxyId。
-   *
-   * 优先级:
-   *   1. draft 显式带了 `proxyId`(Phase 1c 后的 UI 走这条)→ 直接用,null 也接受
-   *   2. draft 带了 inline `proxy` 输入(老 ProfileFormDialog 兼容路径)→ 找/建 ProxyStore 条目
-   *   3. existing profile 有 proxyId → 保留
-   *   4. 全空 → null(系统代理)
-   */
-  private resolveProxyId(
-    draft: ProfileDraft,
-    existing: BrowserProfile | undefined,
-    derivedProxy: ProxyConfig
-  ): string | null {
-    if (Object.prototype.hasOwnProperty.call(draft, 'proxyId')) {
-      return draft.proxyId ?? null
-    }
-    if (draft.proxy && draft.proxy.host) {
-      return this.proxyStore.findOrCreateFromLegacyInline({
-        host: derivedProxy.host,
-        port: derivedProxy.port,
-        username: derivedProxy.username,
-        password: derivedProxy.password
-      })
-    }
-    if (existing?.proxyId !== undefined) return existing.proxyId
-    return null
   }
 
   private save() {
