@@ -35,5 +35,6 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['test-script']
-  }
+  },
+  base:'./'
 })
