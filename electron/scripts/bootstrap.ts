@@ -1,11 +1,20 @@
 import fs from 'node:fs'
 import Module from 'node:module'
 import path from 'node:path'
+import { ensureEsbuildBinaryPath } from './esbuild-binary'
 import { transformSync } from 'esbuild'
 import { createScriptApi } from './sdk'
 import { createBridgeClient } from './sdk/bridge-client'
 import type { ScriptContext, ScriptMainArgs } from './sdk/types'
 import type { BrowserProfile } from '../types'
+
+// 必须早于 esbuild 被**调用**,不需要早于 import:`import { transformSync }` 只是
+// 把绑定挂出来,esbuild 自己的 lib 不会在 import 时 spawn 二进制,只在第一次
+// `transformSync(...)` 调用时才会去 spawn。我们这里在模块顶级 side effect 位置
+// 把 ESBUILD_BINARY_PATH 设好,esbuild 在调用时读 env,跳过它自己的 require.resolve
+// 直接 spawn 我们指定的(已 unpack 出 asar 的)路径。dev 模式 path 不含 .asar 段,
+// ensureEsbuildBinaryPath 内部 replace 是 noop,行为不变。
+ensureEsbuildBinaryPath()
 
 /**
  * 脚本子进程的真正入口：父进程 fork 这个文件的编译产物。
