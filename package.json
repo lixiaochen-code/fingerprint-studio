@@ -22,7 +22,11 @@
     "productName": "Auto Registry",
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/7zip-bin/**"
+      "**/node_modules/7zip-bin/**",
+      "**/node_modules/@esbuild/**",
+      "**/node_modules/esbuild/bin/**",
+      "**/node_modules/.pnpm/@esbuild+*/**",
+      "**/node_modules/.pnpm/esbuild@*/**"
     ],
     "files": [
       "dist/**",
