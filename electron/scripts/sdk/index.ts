@@ -128,6 +128,8 @@ function makeProfileScopeProfilesApi(): ProfilesApi {
   return {
     list: () => Promise.reject(globalNotAvailable()),
     get: () => Promise.reject(globalNotAvailable()),
+    launch: () => Promise.reject(globalNotAvailable()),
+    close: () => Promise.reject(globalNotAvailable()),
     create: () => Promise.reject(globalNotAvailable()),
     delete: () => Promise.reject(globalNotAvailable()),
     setQueue: () => Promise.reject(globalNotAvailable())
@@ -139,18 +141,29 @@ function makeProfileScopeProfilesApi(): ProfilesApi {
  *
  * - `list / get`:走 BridgeClient → 主进程 ProfileStore 真实读;reject 路径 wrap
  *   一层 ScopeMismatchError 见 wrapBridgeRejection。
+ * - `launch / close`:走 BridgeClient → 主进程浏览器生命周期。launch 已启动则
+ *   no-op 复用;close 没在跑则 no-op resolve;close 在 PROFILE_BUSY 时早返回不动
+ *   浏览器(由 ScriptBridge 那侧保证)。详见 launch-close 子 spec。
  * - `create / delete / setQueue`:phase 6 仍占位 —— 在 SDK 层就 throw,**不**发
  *   BridgeRequest(对应 Requirement 8.3:不修改 ProfileStore / 磁盘内容)。
  *
  * 注意:list/get 的 BridgeClient 泛型参数(BrowserProfile / BrowserProfile|null)
  * 与 design.md §6.2 表中 success value 形状严格一致;泛型只在 SDK 这层声明,
  * BridgeClient 本身不感知具体类型。
+ *
+ * launch/close 的 BridgeClient 泛型用 `null` —— 主进程那侧成功时写
+ * `value: null`,SDK 这层用 `.then(() => undefined)` 把 null 抹掉以严格匹配
+ * 类型签名 `Promise<void>`。
  */
 function makeGlobalScopeProfilesApi(bridge: BridgeClient): ProfilesApi {
   return {
     list: () => wrapBridgeRejection(bridge.call<BrowserProfile[]>('profiles.list', {})),
     get: (id: string) =>
       wrapBridgeRejection(bridge.call<BrowserProfile | null>('profiles.get', { id })),
+    launch: (id: string) =>
+      wrapBridgeRejection(bridge.call<null>('profiles.launch', { id })).then(() => undefined),
+    close: (id: string) =>
+      wrapBridgeRejection(bridge.call<null>('profiles.close', { id })).then(() => undefined),
     create: () => notImplementedYet('create'),
     delete: () => notImplementedYet('delete'),
     setQueue: () => notImplementedYet('setQueue')

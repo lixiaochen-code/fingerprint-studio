@@ -33,13 +33,20 @@
 /**
  * fork ↔ main 协议白名单方法。
  *
- * phase 6 仅包含 profiles 只读两条 + runScript;profiles 写接口
- * (create / delete / setQueue)在 SDK 层就 throw `GLOBAL_NOT_IMPL_YET`,
+ * - `profiles.list` / `profiles.get`:全局脚本读 ProfileStore 真源
+ * - `profiles.launch` / `profiles.close`:全局脚本控制浏览器生命周期(只启动 / 显式
+ *   关闭),不跑任何脚本。launch 已启动则 no-op 复用,close 没在跑则 no-op resolve;
+ *   close 在 PROFILE_BUSY 时早返回不动浏览器。详见 launch-close 子 spec。
+ * - `runScript`:全局脚本调度子 ScriptRun
+ *
+ * profiles 写接口(create / delete / setQueue)在 SDK 层就 throw `GLOBAL_NOT_IMPL_YET`,
  * 不会发起 BridgeRequest,因此不在本联合中。
  */
 export type BridgeMethod =
   | 'profiles.list'
   | 'profiles.get'
+  | 'profiles.launch'
+  | 'profiles.close'
   | 'runScript'
 
 /**

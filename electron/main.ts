@@ -430,7 +430,18 @@ app.whenReady().then(async () => {
   // 它依赖 main.ts 模块级闭包(profileProcesses Map / launchProfile / DevTools
   // 等),抽进 bridge 会拖走一大坨主进程胶水代码,违背 bridge 的"协议路由"
   // 单一职责。直接传引用,bridge 当黑盒调用即可。
-  scriptBridge = new ScriptBridge(scriptRuntime, scriptStore, store, ensureProfileRunningForScript)
+  scriptBridge = new ScriptBridge(
+    scriptRuntime,
+    scriptStore,
+    store,
+    ensureProfileRunningForScript,
+    // launch-close 子 spec(launch / close 路由用)。
+    // launchProfileForScript:复用 ensureProfileRunningForScript 然后丢弃 wsUrl。
+    // .then(() => undefined) 让类型契约严格匹配 Promise<void>,而非 Promise<string>。
+    (profile) => ensureProfileRunningForScript(profile).then(() => undefined),
+    // closeProfileBrowser:直接复用本文件内抽出的单条状态机函数。
+    terminateProfileBrowser
+  )
   scriptRuntime.setBridge(scriptBridge)
   scriptRuntime.on('event', (event: ScriptRuntimeEvent) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
@@ -652,45 +663,90 @@ app.on('window-all-closed', () => {
 })
 
 /**
+ * SIGTERM 后给 Chromium 落盘 cookie/state 的最长等待时间。超时后发 SIGKILL,
+ * 再给 200ms 兜底防止信号被吃掉。
+ *
+ * 抽成模块级常量是为了 `terminateProfileBrowser` 与 `terminateAllProfileBrowsers`
+ * 共享同一个值;原来 GRACEFUL_MS 是函数局部常量,launch-close 子 spec 抽出
+ * 单条函数后两份会漂移,提升到模块级。
+ */
+const PROFILE_GRACEFUL_MS = 2500
+const PROFILE_KILL_GRACE_MS = 200
+
+/**
+ * 关闭单个 profile 的浏览器子进程。
+ *
+ * 设计:
+ * - 不在跑 / 已 killed / 已退出 → 幂等 no-op,只把 profileProcesses 表项删掉再返回
+ * - 还在跑 → 先 SIGTERM,给 PROFILE_GRACEFUL_MS 走 cookie/state 落盘;超时 SIGKILL,
+ *   再给 PROFILE_KILL_GRACE_MS 兜底
+ * - 任一时刻 child.kill 同步 throw(channel 已断 / 进程已无效)→ 视为已退出处理,
+ *   静默吞 + 删表项 + resolve(对应 launch-close requirements §2.8;不向调用方
+ *   propagate,profiles.close 仍以 ok=true 结算 —— 进程已经不在了,用户目的已达成)
+ *
+ * 永不 reject;最坏情况下 ≤ PROFILE_GRACEFUL_MS + PROFILE_KILL_GRACE_MS 内 resolve。
+ *
+ * 与 spawn 注册的 child.on('exit', () => profileProcesses.delete(...)) 是幂等关系:
+ * 两条路径都会 delete,后到的那条找不到表项也是 no-op。
+ */
+async function terminateProfileBrowser(profileId: string): Promise<void> {
+  const child = profileProcesses.get(profileId)
+  if (!child) return
+  // killed = 我们曾经成功 .kill() 过它(不论它是否真的退出);这种情况下再发一次
+  // SIGTERM 没意义,直接当 no-op 处理。
+  if (child.killed) {
+    profileProcesses.delete(profileId)
+    return
+  }
+  // 进程已退,只是 spawn 的 'exit' listener 还没把表清掉(异步窗口期);等同 no-op。
+  if (child.exitCode !== null || child.signalCode !== null) {
+    profileProcesses.delete(profileId)
+    return
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      // 幂等 delete:spawn 的 'exit' listener 也会 delete 一次,后到的 no-op
+      profileProcesses.delete(profileId)
+      resolve()
+    }
+    child.once('exit', done)
+
+    // SIGTERM 同步 throw → 视为已退出处理;不向调用方 propagate
+    try { child.kill('SIGTERM') } catch { done(); return }
+
+    setTimeout(() => {
+      if (settled) return
+      try { child.kill('SIGKILL') } catch {}
+      // SIGKILL 通常很快触发 'exit';再给 PROFILE_KILL_GRACE_MS 防止万一信号被吃掉
+      setTimeout(done, PROFILE_KILL_GRACE_MS)
+    }, PROFILE_GRACEFUL_MS)
+  })
+}
+
+/**
  * 优雅关闭所有由本应用启动的 Chromium 子进程。
  *
  * 设计:
- * - 先 SIGTERM(Windows 上是 child.kill() 默认 SIGTERM 模拟),给 Chromium 一个机会
- *   走完落盘 cookie/state 的流程
- * - 平行等所有子进程 exit,最长 GRACEFUL_MS;超时后对仍存活的发 SIGKILL
- * - 最后清空 profileProcesses,让重复调用幂等
+ * - 拍 keys() 快照后并行调 terminateProfileBrowser,避免循环中 delete 修改 Map
+ *   引发"集合在迭代时被修改"的竞态
+ * - 单条状态机由 terminateProfileBrowser 负责(SIGTERM → 等 exit → 超时 SIGKILL),
+ *   本函数只是并行编排器;两边共用 PROFILE_GRACEFUL_MS / PROFILE_KILL_GRACE_MS
+ *   常量,不会漂移
  *
  * 之所以不复用 spawn 的 'exit' 事件做计数:那个 listener 在主进程里被 detached + unref
  * 的子进程是否触发,跨平台行为不一致。这里直接用 Promise + setTimeout 自己控时序更稳。
  */
 async function terminateAllProfileBrowsers(): Promise<void> {
-  const GRACEFUL_MS = 2500
-  const entries = Array.from(profileProcesses.values()).filter((child) => !child.killed)
-  if (entries.length === 0) return
-
-  const waiters = entries.map((child) => new Promise<void>((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve()
-      return
-    }
-    let settled = false
-    const done = () => {
-      if (settled) return
-      settled = true
-      resolve()
-    }
-    child.once('exit', done)
-    try { child.kill('SIGTERM') } catch { done() }
-    setTimeout(() => {
-      if (settled) return
-      try { child.kill('SIGKILL') } catch {}
-      // SIGKILL 会很快触发 exit;万一没触发,再给一小段时间然后强制 resolve
-      setTimeout(done, 200)
-    }, GRACEFUL_MS)
-  }))
-
-  await Promise.all(waiters)
-  profileProcesses.clear()
+  // 关键:先拍快照再 await。terminateProfileBrowser 自身会 profileProcesses.delete,
+  // 直接用 .keys() 迭代会让"集合在迭代时被修改"
+  const ids = Array.from(profileProcesses.keys())
+  await Promise.all(ids.map((id) => terminateProfileBrowser(id)))
+  // profileProcesses 由各 terminateProfileBrowser 路径自行 delete;不在此再 clear,
+  // 避免误删并发期间被其它代码 set 进的新条目
 }
 
 // 应用准备退出:先杀脚本子进程(自身已实现 graceful shutdown),再杀所有 profile 浏览器,

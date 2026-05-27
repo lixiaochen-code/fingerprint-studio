@@ -52,6 +52,19 @@ export interface ScriptMainArgs<P = Record<string, unknown>> {
 export interface ProfilesApi {
   list(): Promise<Readonly<BrowserProfile>[]>
   get(id: string): Promise<Readonly<BrowserProfile> | null>
+  /**
+   * 仅启动 profile 浏览器,不跑任何脚本。等 CDP 就绪后 resolve。
+   * 已启动则 no-op 复用同一进程。
+   * profile-scope 脚本调用会 reject GLOBAL_NOT_AVAILABLE。
+   */
+  launch(id: string): Promise<void>
+  /**
+   * 显式关闭 profile 浏览器,等浏览器进程真退出后 resolve。
+   * profile 上有活跃 ScriptRun 时 reject PROFILE_BUSY(带 occupiedBy)。
+   * 浏览器本来就没在跑则 no-op resolve。
+   * profile-scope 脚本调用会 reject GLOBAL_NOT_AVAILABLE。
+   */
+  close(id: string): Promise<void>
   /** 创建 profile;draft.id 冲突时 throw ProfileIdTakenError */
   create(draft: ProfileDraft): Promise<BrowserProfile>
   delete(id: string): Promise<void>

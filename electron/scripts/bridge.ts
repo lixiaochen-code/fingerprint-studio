@@ -120,7 +120,27 @@ export class ScriptBridge {
      * 避免脚本子系统出现两条不同的"启动浏览器 + 等 CDP"路径。
      * task 4 的 executeRunScript 内部会调用它。
      */
-    private readonly ensureProfileRunningForScript: (profile: BrowserProfile) => Promise<string>
+    private readonly ensureProfileRunningForScript: (profile: BrowserProfile) => Promise<string>,
+    /**
+     * launch-close 子 spec 注入的两条主进程胶水回调(沿用 phase 6 既有范式 ——
+     * bridge 不感知 main.ts 模块级闭包,主进程胶水以函数引用注入)。
+     *
+     * 为什么不让 launch 复用 ensureProfileRunningForScript 然后丢弃 wsUrl 返回值:
+     * 后者契约是"启动 + 返回 webSocketDebuggerUrl",其中"返回 wsUrl"是
+     * runScript 的硬需求(用来 puppeteer.connect)。profiles.launch 的契约只是
+     * "启动浏览器",不背"等 DevTools endpoint 就绪"的语义。独立 callback 让
+     * main.ts 那侧将来能换实现(比如换成"只 spawn 不等 endpoint")而不影响
+     * bridge 的协议契约。详见 launch-close design.md §5.2。
+     *
+     * launchProfileForScript:仅启动浏览器(实装上仍复用
+     * ensureProfileRunningForScript 然后丢弃 wsUrl,但类型契约 Promise<void>)。
+     */
+    private readonly launchProfileForScript: (profile: BrowserProfile) => Promise<void>,
+    /**
+     * closeProfileBrowser:关闭单个 profile 的浏览器子进程。内部对"未在跑"是
+     * no-op(只清表),与 profiles.close requirements §2.5 的 no-op resolve 语义对齐。
+     */
+    private readonly closeProfileBrowser: (profileId: string) => Promise<void>
   ) {
     // 构造尾部订阅 runtime 事件总线,接通"父 run 消失"触发器(task 5)。
     //
@@ -293,6 +313,81 @@ export class ScriptBridge {
               id: request.id,
               ok: true,
               value
+            })
+            return
+          }
+          case 'profiles.launch': {
+            // payload 形状:{ id: string }。校验失败走 INTERNAL_ERROR(由外层 catch 翻译)。
+            const payload = request.payload as { id?: unknown } | null | undefined
+            const id = payload?.id
+            if (typeof id !== 'string') {
+              throw new Error('profiles.launch: payload.id must be a string')
+            }
+            const profile = this.profileStore.get(id)
+            if (!profile) {
+              this.sendResponse(child, {
+                kind: 'response',
+                id: request.id,
+                ok: false,
+                error: { code: 'PROFILE_NOT_FOUND', message: `profile not found: ${id}` }
+              })
+              return
+            }
+            // 复用 launchProfile 的"已启动则 no-op"分支;不在 bridge 这层判
+            // profileProcesses 状态(那是 main.ts 内部簿记)。
+            // launch 失败抛出来 → 外层 catch 翻译成 INTERNAL_ERROR + 原 message。
+            await this.launchProfileForScript(profile)
+            this.sendResponse(child, {
+              kind: 'response',
+              id: request.id,
+              ok: true,
+              value: null
+            })
+            return
+          }
+          case 'profiles.close': {
+            const payload = request.payload as { id?: unknown } | null | undefined
+            const id = payload?.id
+            if (typeof id !== 'string') {
+              throw new Error('profiles.close: payload.id must be a string')
+            }
+            const profile = this.profileStore.get(id)
+            if (!profile) {
+              this.sendResponse(child, {
+                kind: 'response',
+                id: request.id,
+                ok: false,
+                error: { code: 'PROFILE_NOT_FOUND', message: `profile not found: ${id}` }
+              })
+              return
+            }
+            // 占用检测先于 close —— 反过来会出现"已发完 SIGTERM 才发现 profile 上有
+            // active run"的不可恢复路径(浏览器已被杀,active run 因此立刻崩 +
+            // close 报 PROFILE_BUSY,用户两端都看到错)。详见 launch-close design §5.4。
+            const occupiedBy = this.runtime.getActiveByProfile(id)
+            if (occupiedBy) {
+              // 手动构造 PROFILE_BUSY BridgeError 而非 throw ProfileBusyError 让外层
+              // 翻译 —— 因为这里要透传 runtime.getActiveByProfile() 的返回值字段
+              // (是 ScriptRun 子集,而非 ProfileBusyError 实例),手动构造更直白。
+              this.sendResponse(child, {
+                kind: 'response',
+                id: request.id,
+                ok: false,
+                error: {
+                  code: 'PROFILE_BUSY',
+                  message: `profile ${id} is occupied by run ${occupiedBy.id} (script ${occupiedBy.scriptId})`,
+                  occupiedBy: { runId: occupiedBy.id, scriptId: occupiedBy.scriptId }
+                }
+              })
+              return
+            }
+            // closeProfileBrowser 内部对"未在跑"是 no-op resolve;bridge 这层不重复判。
+            await this.closeProfileBrowser(id)
+            this.sendResponse(child, {
+              kind: 'response',
+              id: request.id,
+              ok: true,
+              value: null
             })
             return
           }
@@ -787,6 +882,8 @@ export class ScriptBridge {
 const BRIDGE_METHODS: ReadonlySet<BridgeMethod> = new Set<BridgeMethod>([
   'profiles.list',
   'profiles.get',
+  'profiles.launch',
+  'profiles.close',
   'runScript'
 ])
 
