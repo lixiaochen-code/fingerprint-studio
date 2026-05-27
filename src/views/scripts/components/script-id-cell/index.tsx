@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 
-export interface ProfileIdCellProps {
+export interface ScriptIdCellProps {
   id: string
   /** 复制成功时的 toast 文案 */
   copiedToast: string
@@ -10,17 +10,18 @@ export interface ProfileIdCellProps {
 }
 
 /**
- * 环境列表的 ID 单元。
+ * 脚本详情顶部的 ID 单元。
  *
- * 极简风格:
- * - 默认普通灰色 mono 文本,带浅色虚线下划线提示"可点击复制"
- * - hover 加深字色与虚线颜色,cursor pointer
- * - 点击复制完整 id;反馈通过全局 sonner toast,不在单元里做状态切换
+ * 与 ProfileIdCell 视觉、交互保持一致:
+ * - mono 灰字 + 浅色虚线下划线,提示可点击复制
+ * - hover 时字色加深、虚线变实色感
+ * - 点击复制完整 id,反馈走全局 sonner toast(避免在标题区做局部状态闪烁)
  *
- * 反馈不在元素上闪而是用 toast,因为表内行多时局部反馈不容易被看到,toast 在右上角更显眼。
- * 选用虚线下划线而不是悬浮才出实线:虚线本身是"可交互"提示,不需要 hover 才暴露。
+ * 单独抽组件而不是直接复用 ProfileIdCell:语义不同(脚本 vs 环境)、未来如果需要
+ * 加上"在脚本管理中跳转"之类的增强,留独立扩展点;同时把样式集中在两个 cell 文件里,
+ * 视觉一致性靠 className 字面量保持(都是同一组类)。
  */
-export function ProfileIdCell({ id, copiedToast, copyFailedToast }: ProfileIdCellProps) {
+export function ScriptIdCell({ id, copiedToast, copyFailedToast }: ScriptIdCellProps) {
   const onCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(id)
@@ -42,4 +43,4 @@ export function ProfileIdCell({ id, copiedToast, copyFailedToast }: ProfileIdCel
   )
 }
 
-export default ProfileIdCell
+export default ScriptIdCell

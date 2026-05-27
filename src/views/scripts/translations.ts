@@ -52,6 +52,12 @@ export type Translations = {
   globalBadge: string
   /** 全局脚本运行面板:无 profile 选择,顶部提示文案 */
   globalRunHint: string
+  /** 脚本详情头部 ID 列文案(label) */
+  scriptId: string
+  /** 复制脚本 ID 成功 toast */
+  scriptIdCopiedToast: string
+  /** 复制脚本 ID 失败 toast */
+  scriptIdCopyFailedToast: string
 }
 
 export const labels: Record<Locale, Translations> = {
@@ -93,7 +99,10 @@ export const labels: Record<Locale, Translations> = {
     scopeProfileHint: 'Runs against one environment; SDK exposes browser/page/profile/...',
     scopeGlobalHint: 'Scheduler that drives other scripts; SDK exposes profiles/runScript (no browser).',
     globalBadge: 'GLOBAL',
-    globalRunHint: 'Global scripts run without an environment. Click Run to execute.'
+    globalRunHint: 'Global scripts run without an environment. Click Run to execute.',
+    scriptId: 'ID',
+    scriptIdCopiedToast: 'Script ID copied to clipboard.',
+    scriptIdCopyFailedToast: 'Failed to copy script ID.'
   },
   zh: {
     title: '脚本',
@@ -132,6 +141,9 @@ export const labels: Record<Locale, Translations> = {
     scopeProfileHint: '绑定到某个环境运行;SDK 含 browser/page/profile/... ',
     scopeGlobalHint: '不绑环境的调度器;SDK 含 profiles/runScript,**没有** browser。',
     globalBadge: '全局',
-    globalRunHint: '全局脚本不绑环境,点击"运行"直接执行。'
+    globalRunHint: '全局脚本不绑环境,点击"运行"直接执行。',
+    scriptId: 'ID',
+    scriptIdCopiedToast: '脚本 ID 已复制到剪贴板。',
+    scriptIdCopyFailedToast: '复制脚本 ID 失败。'
   }
 }

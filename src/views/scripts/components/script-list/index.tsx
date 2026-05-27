@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import type { Script, ScriptSource } from '../../../../../electron/types'
 import type { Translations } from '../../translations'
+import { ScriptIdCell } from '../script-id-cell'
 import { SourceBadge } from '../source-badge'
 
 export interface ScriptListProps {
@@ -70,14 +71,25 @@ export function ScriptList({
               const isActive = script.id === selectedScriptId
               return (
                 <li key={script.id}>
-                  <button
-                    type="button"
-                    className={`flex w-full flex-col gap-0.5 border px-3 py-2 text-left transition-colors ${
+                  {/*
+                    用 div + role=button 而不是 <button>,因为行内嵌了 ScriptIdCell(它本身是 <button>),
+                    button 嵌 button 是非法 HTML;改成 div 后键盘可达性靠 tabIndex + onKeyDown 维持。
+                  */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className={`flex w-full cursor-pointer flex-col gap-0.5 border px-3 py-2 text-left transition-colors ${
                       isActive
                         ? 'border-primary bg-primary/10'
                         : 'border-transparent hover:border-border hover:bg-muted/30'
                     }`}
                     onClick={() => onSelect(script.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        onSelect(script.id)
+                      }
+                    }}
                   >
                     <div className="flex items-center justify-between gap-1">
                       <div className="flex min-w-0 items-center gap-1.5">
@@ -99,10 +111,25 @@ export function ScriptList({
                         {script.description}
                       </span>
                     )}
+                    {/*
+                      ID 列:与环境列表的 ProfileIdCell 完全一致的 mono + 虚线下划线 + 点击复制。
+                      onClick 与 onKeyDown stopPropagation,避免触发外层"选中脚本"的点击。
+                    */}
+                    <div
+                      className="truncate"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <ScriptIdCell
+                        id={script.id}
+                        copiedToast={t.scriptIdCopiedToast}
+                        copyFailedToast={t.scriptIdCopyFailedToast}
+                      />
+                    </div>
                     <span className="truncate font-mono text-[10px] text-muted-foreground opacity-60">
                       {script.entryPath}
                     </span>
-                  </button>
+                  </div>
                 </li>
               )
             })}
