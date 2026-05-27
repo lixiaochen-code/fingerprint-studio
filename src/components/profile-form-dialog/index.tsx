@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Tooltip } from '@/components/ui/tooltip'
 import type {
   BrowserPlugin,
   BrowserProfile,
@@ -235,16 +237,17 @@ export function ProfileFormDialog({ open, mode, initial, plugins, proxies, local
         <Field label={t.name}>
           <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder={t.namePlaceholder} />
         </Field>
-        <Field label={t.targetOs}>
+        <Field label={t.targetOs} hint={t.targetOsLockedHint}>
           {/*
             目标系统改成只读展示:`fingerprint.ts::resolveTargetOs` 把 targetOs 钳到宿主,
             UI 上保留"Target OS"标签,但下拉选项失去实际效果(选了也会被忽略)。直接显示
             当前值 + 解释,比让用户做无效操作更诚实。
+            原来那段长说明文本由 Field 的 hint prop 改成 hover 提示(琥珀色三角感叹号),
+            表单视觉重量轻一些,同时不丢上下文。
           */}
           <div className="flex h-10 items-center border border-input bg-muted/30 px-3 text-xs font-mono text-muted-foreground">
             {targetLabel[form.targetOs]}
           </div>
-          <p className="text-[11px] text-muted-foreground">{t.targetOsLockedHint}</p>
         </Field>
         <Field label={t.startUrl} className="md:col-span-2">
           <Input value={form.startUrl} onChange={(e) => setForm((prev) => ({ ...prev, startUrl: e.target.value }))} placeholder={t.startUrlPlaceholder} />
@@ -289,10 +292,37 @@ export function ProfileFormDialog({ open, mode, initial, plugins, proxies, local
   )
 }
 
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+/**
+ * 表单字段壳。
+ *
+ * `hint`(可选):在 label 文字右侧渲染一个琥珀色 AlertTriangle 小图标,hover
+ * 显示 Tooltip 内容。原来"目标系统"下方的整段裸说明文本就是用这条改成 hover
+ * 提示的;表单视觉重量降下来,同时不丢失上下文。
+ */
+function Field({
+  label,
+  hint,
+  children,
+  className
+}: {
+  label: string
+  hint?: React.ReactNode
+  children: React.ReactNode
+  className?: string
+}) {
   return (
     <label className={`space-y-2 ${className || ''}`}>
-      <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        {label}
+        {hint && (
+          <Tooltip side="top" align="start" content={hint}>
+            <AlertTriangle
+              className="h-3 w-3 cursor-help text-amber-400"
+              aria-hidden="true"
+            />
+          </Tooltip>
+        )}
+      </span>
       {children}
     </label>
   )
