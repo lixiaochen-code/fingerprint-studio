@@ -4,6 +4,10 @@ import { fork, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import type { BrowserProfile, Script, ScriptRun, ScriptRunStatus, ScriptTriggeredBy } from '../types'
 import type { ScriptStore } from './store'
+// 仅类型 import:bridge.ts 自身又会 import runtime.ts 的运行时值
+// (`ProfileBusyError` 类),若这里也走运行时 import 会形成循环依赖,在 ts→js 编译
+// 后某一侧拿到的会是 undefined。`import type` 在编译期被擦除,完全规避这个问题。
+import type { ScriptBridge } from './bridge'
 import { scriptsRoot } from '../paths'
 
 /**
@@ -92,8 +96,39 @@ export class ProfileBusyError extends Error {
 export class ScriptRuntimeManager extends EventEmitter {
   private readonly active = new Map<string, ActiveRun>()
 
+  /**
+   * fork ↔ main IPC 路由器(ScriptBridge)的回填引用。
+   *
+   * ## 为什么用 setter 注入而不是构造函数注入
+   *
+   * Bridge 构造时也需要 runtime 引用(读 active / 触发 stop / 启动子 run),两侧
+   * 形成双向依赖。如果走构造函数注入,任一侧先被 new 出来时另一侧都还不存在 —
+   * 没有"先有完整对象"的解。
+   *
+   * 走 setter 后,wiring 顺序变成单向回填闭环:
+   *   1. new ScriptRuntimeManager(scriptStore)  // bridge=null
+   *   2. new ScriptBridge(runtime, ...)         // bridge 持有 runtime 引用
+   *   3. runtime.setBridge(bridge)              // runtime 回填 bridge 引用
+   *
+   * 之后 start() 内 attach 调用走 `this.bridge?.attach(...)`,可选链 + null 兜底,
+   * 即便有人忘记调 setBridge 也只会让 IPC 路由失效,runtime 自身仍能跑(测试 /
+   * 旧调用方场景)。
+   */
+  private bridge: ScriptBridge | null = null
+
   constructor(private readonly store: ScriptStore) {
     super()
+  }
+
+  /**
+   * 由 main.ts wiring 阶段调用,把已构造好的 ScriptBridge 回填进来。
+   *
+   * 设计为单次写入语义(没有 unsetBridge / replaceBridge):应用生命周期里
+   * bridge 只有一个,重复 set 通常意味着 wiring bug。但这里不强制 throw —
+   * 测试场景可能需要替换 mock,用 setter 保持灵活。
+   */
+  setBridge(bridge: ScriptBridge): void {
+    this.bridge = bridge
   }
 
   /**
@@ -183,11 +218,35 @@ export class ScriptRuntimeManager extends EventEmitter {
       entryPath: script.entryPath
     })
 
+    // main(args) 协议(spec §4.1):args 是脚本入参,与 SCRIPT_CONTEXT 的"启动检查"语义不同。
+    // 故意不合并到 SCRIPT_CONTEXT —— bootstrap 在 readBootstrapEnv 里会校验 profile/wsUrl,
+    // 把 params/triggeredBy 塞进去会破坏 phase 1/2 已经生效的错误信息分支。
+    // parentRunId 仅在调用方传入时序列化,缺省不写入 key,保持 JSON 干净。
+    const argsPayload: Record<string, unknown> = {
+      params: params ?? {},
+      profile: profile ?? null,
+      run: { id: run.id, startedAt: run.startedAt },
+      triggeredBy
+    }
+    if (parentRunId) argsPayload.parentRunId = parentRunId
+    const argsEnv = JSON.stringify(argsPayload)
+
     const child = fork(bootstrapPath, [], {
       cwd: workingDir,
-      env: this.makeChildEnv(contextEnv),
+      env: this.makeChildEnv(contextEnv, argsEnv),
       stdio: ['ignore', 'pipe', 'pipe', 'ipc']
     })
+
+    // 把这条 fork 注册进 bridge:挂 IPC message/exit 监听 + 登记 forks 表。
+    //
+    // 必须在 fork 创建后**立即**调,早于下面 child.stdout/child.on('message') 等
+    // 任何其它监听器 —— 否则首条 BridgeRequest(用户脚本启动很早就可能调
+    // profiles.list 之类)会因为 bridge 还没 attach 而被 Node 默默丢掉,
+    // 表现为 fork 内 await 永远 hang,排障极痛。
+    //
+    // 用可选链:setBridge 还没被 main.ts 回填(纯 runtime 单测 / 旧调用路径)时
+    // 跳过,runtime 自己仍正常工作。
+    this.bridge?.attach(child, run.id)
 
     const abort = new AbortController()
     const startedRun: ScriptRun = { ...run, status: 'running' }
@@ -250,11 +309,13 @@ export class ScriptRuntimeManager extends EventEmitter {
 
   // —— internal ————————————————————————————————————————————————
 
-  private makeChildEnv(contextEnv: string): NodeJS.ProcessEnv {
+  private makeChildEnv(contextEnv: string, argsEnv: string): NodeJS.ProcessEnv {
     // 只透传最小必要环境变量 + 我们自己的注入；避免把整台机器的 env 复制给脚本
     const passthroughKeys = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'LC_MESSAGES', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA']
     const env: NodeJS.ProcessEnv = {
       AUTO_REGISTRY_SCRIPT_CONTEXT: contextEnv,
+      // main(args) 协议:bootstrap 从这里读出 args 后传给用户的 default export(spec §4.3)
+      AUTO_REGISTRY_SCRIPT_ARGS: argsEnv,
       NODE_ENV: 'production'
     }
     for (const key of passthroughKeys) {

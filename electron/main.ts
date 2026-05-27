@@ -22,6 +22,7 @@ import { cancelInstall, installKernel, isInstalling } from './downloader'
 import { ensureDirs, pluginsRoot } from './paths'
 import { ScriptStore } from './scripts/store'
 import { ScriptRuntimeManager, ProfileBusyError, type ScriptRuntimeEvent } from './scripts/runtime'
+import { ScriptBridge } from './scripts/bridge'
 import { runStartupJanitor } from './scripts/janitor'
 import { testProxy } from './proxyTest'
 import { testProxy as testProxyV2 } from './proxies/test'
@@ -37,6 +38,7 @@ let store: ProfileStore
 let proxyStore: ProxyStore
 let scriptStore: ScriptStore
 let scriptRuntime: ScriptRuntimeManager
+let scriptBridge: ScriptBridge
 const profileProcesses = new Map<string, ChildProcess>()
 const STDERR_TAIL_LIMIT = 8 * 1024 // 8KB of recent stderr per profile, cheap and enough for stack traces
 
@@ -415,6 +417,21 @@ app.whenReady().then(async () => {
   store = new ProfileStore(proxyStore)
   scriptStore = new ScriptStore()
   scriptRuntime = new ScriptRuntimeManager(scriptStore)
+  // wiring 顺序:runtime → bridge → setBridge。
+  // 为什么必须这个顺序:ScriptBridge 构造时就要 runtime 引用(在 ctor 内立即
+  // `runtime.on('event', ...)` 订阅 'active-changed' 触发父 run 消失联动);反过
+  // 来 ScriptRuntimeManager.start() fork 出 child 之后要立即 `bridge.attach(child,
+  // run.id)`,因此 runtime 也需要持 bridge 引用。两侧持有彼此就形成循环依赖,
+  // 用 setter 注入打破:runtime 先以 bridge=null 构造,bridge 拿到 runtime 后再
+  // 单向回填(详见 runtime.ts.setBridge 注释 + bridge.ts 顶部"与 ScriptRuntimeManager
+  // 的回填依赖")。
+  //
+  // 为什么 ensureProfileRunningForScript 透传函数引用而非把它挪进 bridge:
+  // 它依赖 main.ts 模块级闭包(profileProcesses Map / launchProfile / DevTools
+  // 等),抽进 bridge 会拖走一大坨主进程胶水代码,违背 bridge 的"协议路由"
+  // 单一职责。直接传引用,bridge 当黑盒调用即可。
+  scriptBridge = new ScriptBridge(scriptRuntime, scriptStore, store, ensureProfileRunningForScript)
+  scriptRuntime.setBridge(scriptBridge)
   scriptRuntime.on('event', (event: ScriptRuntimeEvent) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     mainWindow.webContents.send('scripts:event', event)
@@ -686,6 +703,14 @@ app.on('before-quit', (event) => {
   isQuitting = true
   void (async () => {
     try {
+      // 清理顺序:bridge 先 shutdown,再 scriptRuntime shutdown,最后等浏览器退出。
+      // 为什么 bridge 必须早于 runtime:bridge.shutdown() 会对所有 fork 的 pending
+      // children 写一条 SCRIPT_STOPPED RESPONSE,让父 fork 内 `await runScript(...)`
+      // 立刻 reject(而不是 hang 到被 SIGKILL)+ 解绑 runtime 'event' 订阅;之后
+      // runtime.shutdown() 才去强杀子进程。反过来如果先 runtime,bridge 还在订阅
+      // 'active-changed',会触发一轮已无意义的 onParentRunFinished,且 pending 无
+      // 法及时收到 SCRIPT_STOPPED reject。
+      scriptBridge?.shutdown()
       await Promise.all([
         scriptRuntime?.shutdown() ?? Promise.resolve(),
         terminateAllProfileBrowsers()

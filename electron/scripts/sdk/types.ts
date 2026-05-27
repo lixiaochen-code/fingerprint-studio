@@ -1,5 +1,9 @@
 import type { Browser, Page } from 'rebrowser-puppeteer-core'
 import type { BrowserProfile, ProfileDraft, ScriptRun, ScriptScope } from '../../types'
+// 仅 import type:bridge-client.ts 含有 process.on('message') 等运行时副作用,
+// 类型层引用走 `import type` 在编译期就被擦除,确保 types.ts 仍是纯类型文件,
+// 不会把 fork 侧运行时代码拖到任何 import 它的模块里(渲染层、主进程都会读这份类型)。
+import type { BridgeClient } from './bridge-client'
 
 /**
  * 用户脚本 `import { ... } from 'auto-registry'` 看到的所有导出类型。
@@ -148,4 +152,16 @@ export interface ScriptContext {
   logSink: (level: 'info' | 'warn' | 'error', args: unknown[]) => void
   /** 父进程下发停止信号时触发 */
   stopSignal: AbortSignal
+  /**
+   * fork ↔ main 双向 IPC 通道客户端。global-scope 必须由 bootstrap 注入一个真实
+   * 实例(BridgeClient),否则 SDK 全局分支(profiles.list/get、runScript)会拿
+   * 不到通道直接报"wiring bug"。profile-scope 不需要这条通道(profiles.* 与
+   * runScript 都直接 reject `GLOBAL_NOT_AVAILABLE`,见 SDK 实现),传 null 即可。
+   *
+   * 设计为可选 + null 默认,避免破坏既有 profile-scope 调用方:
+   *   - phase 1/2 的测试桩 / 渲染层调用方构造 ScriptContext 时不传 bridge → 走
+   *     undefined → SDK 内部统一按 null 处理,profile-scope 路径继续工作;
+   *   - 全局脚本则严格要求 bridge 非 null(见 createScriptApi 的 wiring 检查)。
+   */
+  bridge?: BridgeClient | null
 }

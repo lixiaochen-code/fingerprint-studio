@@ -50,6 +50,41 @@ declare module 'auto-registry' {
   export const profile: Readonly<Profile>
 
   /**
+   * 脚本触发源。手动 Run / 全局脚本调度 / profile 创建后队列 / profile 启动后队列。
+   * 单独抽成联合类型，而不是在 ScriptMainArgs 里写裸字符串字面量，
+   * 这样用户判断 \`if (args.triggeredBy === 'on-launch')\` 时 Monaco 能直接命中字面量补全。
+   */
+  export type ScriptTriggeredBy = 'manual' | 'global-script' | 'on-create' | 'on-launch'
+
+  /**
+   * 用户脚本入口 \`main(args)\` 的实参形状，与 spec §4.1 + electron/scripts/sdk/types.ts 里的
+   * ScriptMainArgs 严格保持一致。Phase 3 把"投递 → bootstrap → main(args)"链路打通后，
+   * 这份类型就是 Monaco 给用户的补全契约。
+   *
+   * 设计要点：
+   * - P 是 \`params\` 形状的泛型，默认 \`Record<string, unknown>\` 表示"任意 JSON 对象"；
+   *   想要严格类型时：\`ScriptMainArgs<{ keyword: string }>\`。
+   * - \`profile\` 用 \`Readonly<Profile> | null\`：profile-scope 是当前环境只读快照，
+   *   global-scope 为 null（全局脚本不绑环境）。这里**不**改 Profile 接口字段，
+   *   phase 4 添加的 onCreateQueue/onLaunchQueue 等到那一阶段再补，避免本阶段超纲。
+   * - \`run\` 故意只暴露最小必要的元数据（id / startedAt），不把内部 ScriptRun 全字段
+   *   都灌给用户脚本，降低后续修改 ScriptRun 时的兼容负担。
+   * - \`parentRunId\` 仅当被全局脚本 runScript 触发时存在，声明为可选。
+   */
+  export interface ScriptMainArgs<P = Record<string, unknown>> {
+    /** 调度方传入的参数；手动 run 时为 {} */
+    params: P
+    /** profile-scope 脚本是当前环境的只读快照；global-scope 脚本为 null */
+    profile: Readonly<Profile> | null
+    /** 当前 ScriptRun 元数据 */
+    run: { id: string; startedAt: string }
+    /** 触发源，脚本可据此分支 */
+    triggeredBy: ScriptTriggeredBy
+    /** 父 run id；由全局脚本 runScript 触发时存在 */
+    parentRunId?: string
+  }
+
+  /**
    * 获取 puppeteer-core 的 Browser 实例。
    * 多次调用复用同一连接；脚本退出时 SDK 自动 disconnect（不会关浏览器窗口）。
    */
@@ -86,6 +121,90 @@ declare module 'auto-registry' {
    * 长循环里建议主动检查 \`if (stopSignal.aborted) return\` 优雅退出。
    */
   export const stopSignal: AbortSignal
+
+  // ——— 全局脚本 API（spec §7） ———————————————————————————————————————
+  // bootstrap 把整个 SDK \`api\` 对象作为虚拟 'auto-registry' 模块的 exports；
+  // 所以这里声明的 \`profiles\` / \`runScript\` 在 profile-scope 脚本里调用会 throw
+  // GlobalNotAvailableError(运行时分支),但类型表面**两种 scope 共用一份**——
+  // Monaco 不需要按 scope 切补全。
+
+  /**
+   * 创建 profile 时调度方传入的草稿。字段与 electron/types.ts ProfileDraft 对齐。
+   * id 留空时由 store 自动分配 uuid;name 必填。
+   */
+  export interface ProfileDraft {
+    id?: string
+    name: string
+    notes?: string
+    startUrl?: string
+    enabledPluginIds?: string[]
+    /** 唯一代理来源 —— ProxyStore 条目 id;null = 无代理(系统代理) */
+    proxyId?: string | null
+    fingerprint?: Record<string, unknown>
+    /** 'mac' | 'win' | 'linux' | 'auto' 之一,缺省走 'auto' */
+    targetOs?: 'mac' | 'win' | 'linux' | 'auto'
+  }
+
+  /**
+   * 子 ScriptRun 的最小可见元数据;runScript 返回值。详细日志请读 logPath 文件回放。
+   */
+  export interface RunScriptResultRun {
+    id: string
+    scriptId: string
+    profileId: string
+    status: 'pending' | 'running' | 'succeeded' | 'failed' | 'stopped'
+    startedAt: string
+    endedAt?: string
+    exitCode?: number | null
+    error?: string
+    logPath: string
+    triggeredBy: ScriptTriggeredBy
+    parentRunId?: string
+    params?: Record<string, unknown>
+  }
+
+  /** runScript 返回:子 run 的终态快照(succeeded / failed / stopped 之一)。 */
+  export interface RunScriptResult {
+    run: RunScriptResultRun
+  }
+
+  /**
+   * 全局脚本 profiles.* 命名空间。在 profile-scope 脚本里调任一方法会 throw
+   * GlobalNotAvailableError;在 global-scope 脚本里目前(phase 6 之前)会 throw
+   * GLOBAL_NOT_IMPL_YET 占位错。类型表面已稳定,可放心写。
+   */
+  export interface ProfilesApi {
+    list(): Promise<Readonly<Profile>[]>
+    get(id: string): Promise<Readonly<Profile> | null>
+    /** 创建 profile;draft.id 冲突时 throw ProfileIdTakenError。 */
+    create(draft: ProfileDraft): Promise<Profile>
+    delete(id: string): Promise<void>
+    /**
+     * 改 profile 的某条队列。kind='on-create' / 'on-launch'。
+     * scriptIds 必须全部是 scope='profile' 脚本;否则 throw InvalidQueueError。
+     */
+    setQueue(profileId: string, kind: 'on-create' | 'on-launch', scriptIds: string[]): Promise<void>
+  }
+
+  /**
+   * profiles.* 命名空间(全局脚本调度 API)。
+   * 在 profile-scope 脚本里访问任何方法会 throw GlobalNotAvailableError。
+   */
+  export const profiles: ProfilesApi
+
+  /**
+   * 触发某个 profile-scope 脚本运行,await 至结束。
+   * - profile-scope 脚本调用:throw GlobalNotAvailableError
+   * - global-scope 脚本:正常 await 子 run 结束并返回终态
+   *
+   * 子 run 自动带 parentRunId=当前全局 run id;triggeredBy='global-script'。
+   * 用户停全局 run 时,当前等待中的子 run 同时被停。
+   */
+  export function runScript(
+    scriptId: string,
+    profileId: string,
+    params?: Record<string, unknown>
+  ): Promise<RunScriptResult>
 }
 `.trim()
 

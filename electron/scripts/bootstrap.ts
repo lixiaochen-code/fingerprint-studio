@@ -3,7 +3,8 @@ import Module from 'node:module'
 import path from 'node:path'
 import { transformSync } from 'esbuild'
 import { createScriptApi } from './sdk'
-import type { ScriptContext } from './sdk/types'
+import { createBridgeClient } from './sdk/bridge-client'
+import type { ScriptContext, ScriptMainArgs } from './sdk/types'
 import type { BrowserProfile } from '../types'
 
 /**
@@ -46,6 +47,62 @@ function readBootstrapEnv(): BootstrapEnv {
     workingDir: parsed.workingDir,
     entryPath: parsed.entryPath
   }
+}
+
+/**
+ * 解析父进程通过 env 投递的 main(args) 入参(spec §4.1 / §4.3)。
+ *
+ * 为什么独立一个 env(`AUTO_REGISTRY_SCRIPT_ARGS`)而不复用 SCRIPT_CONTEXT:
+ * - SCRIPT_CONTEXT 走 readBootstrapEnv 的启动检查(profile / wsUrl 必填校验),
+ *   args 是用户脚本的入参,生命周期与语义都不同;合并会污染 phase 1/2 已经生效
+ *   的错误信息分支。
+ *
+ * 为什么 env 缺失要兜底而不是 throw:
+ * - phase 3 部署后主进程一定会发这个 env。这里的兜底只是为了不让"老 fork 链路"
+ *   或本地直接手工跑 bootstrap 的排障场景崩在第一步,语义上等价于一次手动 run。
+ *   缺失时:params={},profile 走 SCRIPT_CONTEXT 里的 profile 快照保持一致,
+ *   triggeredBy='manual',run 字段填占位值。
+ */
+function readBootstrapArgs(env: BootstrapEnv): ScriptMainArgs {
+  const raw = process.env.AUTO_REGISTRY_SCRIPT_ARGS
+  // 缺省的兜底 args:与手动 run 语义一致
+  const fallback: ScriptMainArgs = {
+    params: {},
+    profile: env.profile,
+    run: { id: '<unknown>', startedAt: new Date().toISOString() },
+    triggeredBy: 'manual'
+  }
+
+  if (!raw) return freezeArgs(fallback)
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<ScriptMainArgs>
+    // 字段缺失时按兜底值补齐;不严格校验形状,避免主进程一旦小改字段就让脚本
+    // 直接挂掉(这里是宽容解析,严格契约由主进程保证)。
+    const merged: ScriptMainArgs = {
+      params: (parsed.params ?? {}) as Record<string, unknown>,
+      profile: parsed.profile ?? env.profile,
+      run: parsed.run ?? fallback.run,
+      triggeredBy: parsed.triggeredBy ?? 'manual',
+      ...(parsed.parentRunId ? { parentRunId: parsed.parentRunId } : {})
+    }
+    return freezeArgs(merged)
+  } catch (error) {
+    // env 异常时不直接崩,降级为兜底——脚本至少能跑起来,排障再看主进程日志
+    postLog('warn', ['Failed to parse AUTO_REGISTRY_SCRIPT_ARGS, falling back to manual defaults:', (error as Error).message])
+    return freezeArgs(fallback)
+  }
+}
+
+/**
+ * 把 args 与 args.profile 冻结成只读语义,与 SDK 里 `api.profile` 走的 Object.freeze
+ * 快照保持一致,防止脚本作者误改 args.profile 字段后影响后续逻辑(例如再次读取或
+ * 传给其他 SDK 调用)。注意只做单层 freeze:profile 字段本身在主进程序列化时
+ * 已脱离主进程对象图,这里的冻结纯粹是给用户的"别改我"提醒。
+ */
+function freezeArgs(args: ScriptMainArgs): ScriptMainArgs {
+  if (args.profile) Object.freeze(args.profile)
+  return Object.freeze(args)
 }
 
 /**
@@ -164,8 +221,19 @@ function inferLoader(entryPath: string): 'ts' | 'tsx' | 'js' | 'jsx' {
 
 async function main(): Promise<void> {
   const env = readBootstrapEnv()
+  // main(args) 协议:env 解析必须在用户代码加载之前,确保 args 与 SDK 一起就绪
+  const args = readBootstrapArgs(env)
 
-  // 用户代码里的 stopSignal 由我们掌控；父进程 SIGTERM 时我们 abort 它
+  // 为什么 bridge 要在 createScriptApi 之前就构造好:
+  // SDK factory(createScriptApi)在闭包里立刻就持 bridge 引用 ——
+  // makeGlobalScopeProfilesApi(bridge) / makeGlobalRunScript(bridge) 都是在工厂
+  // 调用时同步绑定的;迟一步 SDK 那侧拿到的就是 null,用户脚本第一行 `await
+  // profiles.list()` 直接崩在"call of undefined"。
+  // 而且把 bridge 提前到 disconnect handler 注册之前构造,handler 闭包就能引用
+  // 到它(见下方 process.on('disconnect') 里的 bridge.dispose 调用)。
+  const bridge = createBridgeClient()
+
+  // 用户代码里的 stopSignal 由我们掌控;父进程 SIGTERM 时我们 abort 它
   const abortController = new AbortController()
   process.on('SIGTERM', () => {
     postLog('warn', ['Script received SIGTERM; abort stopSignal'])
@@ -173,10 +241,18 @@ async function main(): Promise<void> {
   })
   process.on('SIGINT', () => abortController.abort())
 
-  // 父进程崩溃 / 被 Ctrl+C 会让 IPC 通道 disconnect；此时我们自杀，
+  // 父进程崩溃 / 被 Ctrl+C 会让 IPC 通道 disconnect;此时我们自杀,
   // 避免脚本子进程变成无人管的孤儿继续占用浏览器连接。
   process.on('disconnect', () => {
     console.error('[bootstrap] parent disconnected, exiting')
+    // 为什么 disconnect 时要 dispose bridge:
+    // pending 表里可能挂着 await 中的 profiles.list / runScript;父 channel 已
+    // 断,主进程那侧的 RESPONSE 永远到不了,这些 Promise 会一直 hang 直到 fork
+    // 被 SIGKILL,中间用户代码的 try/catch / finally 都跑不到。dispose 一次性
+    // 把 pending 全 reject('parent disconnected'),让用户的 catch 至少能跑一遍
+    // 收尾。**注意:必须放在 process.exit(1) 之前** —— exit 会立刻终结事件循环,
+    // 排在它之后的语句永远不会执行。
+    bridge.dispose('parent disconnected')
     process.exit(1)
   })
 
@@ -186,7 +262,11 @@ async function main(): Promise<void> {
     webSocketDebuggerUrl: env.webSocketDebuggerUrl,
     workingDir: env.workingDir,
     logSink: postLog,
-    stopSignal: abortController.signal
+    stopSignal: abortController.signal,
+    // 注入 bridge 到 SDK 上下文 —— 全局 scope 的 profiles.* / runScript 走这条
+    // 通道与主进程通信;profile-scope SDK 内部不会读这个字段(直接 reject
+    // GLOBAL_NOT_AVAILABLE),传过去也无副作用。
+    bridge
   }
 
   const api = createScriptApi(context)
@@ -218,7 +298,9 @@ async function main(): Promise<void> {
     //   2. 脚本 `export default async () => {...}` 由我们调起（可选，给希望被框架调度的用户）
     const defaultExport = (moduleExports && (moduleExports.default ?? moduleExports))
     if (typeof defaultExport === 'function') {
-      const maybePromise = defaultExport()
+      // 把解析到的 args 传给用户的 default export(spec §4.3)。
+      // 老 `function main() { ... }` 没声明形参也兼容——JS 函数对额外实参直接忽略。
+      const maybePromise = defaultExport(args)
       if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
         await maybePromise
       }

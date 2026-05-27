@@ -13,6 +13,7 @@ const DEFAULT_SCRIPT_SOURCE = `import { page, log, sleep } from 'auto-registry'
 
 // 脚本的主函数通过 default export 注册,bootstrap 会 await 它结束。
 // args 默认是 {}; profile 字段是当前环境的只读快照,可读但不可改。
+// args.params / args.profile / args.triggeredBy 详见 ScriptMainArgs
 export default async function main(args) {
   const p = await page()
   await p.goto('https://example.com')
@@ -193,6 +194,25 @@ export class ScriptStore {
 
   listRuns(): ScriptRun[] {
     return this.runs
+  }
+
+  /**
+   * 按 id 查历史 ScriptRun。
+   *
+   * 为什么直接扫一遍 listRuns 而不另开 Map 索引:
+   *   - 历史窗口被 RUN_HISTORY_LIMIT(=200)裁剪过,列表本身就是 O(200) 上界,
+   *     线性扫一次成本可忽略;
+   *   - 另开 Map 索引意味着 createRun / finalizeRun / load / remove 全部要双写,
+   *     维护成本远大于读取节省;
+   *   - phase 6 唯一调用方是 ScriptBridge.waitForChildTerminal:子 run 进入终态
+   *     后取持久化对象给父 fork,频率与 runScript 调用次数一致(典型 << 1Hz),
+   *     根本不在性能热点。
+   *
+   * 找不到 → 返回 undefined(由调用方决定 fallback;ScriptBridge 那侧会用事件
+   * 数据合成最小 ScriptRun,对应 design.md §错误场景 2)。
+   */
+  findRunById(runId: string): ScriptRun | undefined {
+    return this.runs.find((run) => run.id === runId)
   }
 
   /**
