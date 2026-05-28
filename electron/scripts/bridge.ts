@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
-import type { BrowserProfile, ScriptRun, ScriptRunStatus } from '../types'
+import type { BrowserProfile, ProfileDraft, ScriptRun, ScriptRunStatus } from '../types'
 import type { ProfileStore } from '../store'
+import { InvalidProfileIdError, ProfileIdTakenError } from '../store'
 import type { ScriptStore } from './store'
 import type { ScriptRuntimeEvent, ScriptRuntimeManager } from './runtime'
 import { ProfileBusyError } from './runtime'
@@ -388,6 +389,38 @@ export class ScriptBridge {
               id: request.id,
               ok: true,
               value: null
+            })
+            return
+          }
+          case 'profiles.create': {
+            // payload 形状:ProfileDraft(name 必填,其它可选)。校验失败走外层
+            // INTERNAL_ERROR 兜底翻译;命中错误经 toBridgeError 映射到
+            // PROFILE_ID_TAKEN / INVALID_PROFILE_ID(由 store.create 抛出)。
+            //
+            // 注:这里**不**做"已有 profile 在跑该 profileId 浏览器"的额外检查 ——
+            // create 是注册新 profile,不可能撞到现存浏览器进程。
+            const payload = request.payload as Partial<ProfileDraft> | null | undefined
+            if (!payload || typeof payload !== 'object') {
+              throw new Error('profiles.create: payload must be a ProfileDraft object')
+            }
+            if (typeof payload.name !== 'string') {
+              throw new Error('profiles.create: payload.name is required (string)')
+            }
+            if (payload.id !== undefined && typeof payload.id !== 'string') {
+              throw new Error('profiles.create: payload.id must be a string when provided')
+            }
+            // 直接走 ProfileStore.create —— phase 1 已经写好的"显式新建"路径;
+            // id 冲突会抛 ProfileIdTakenError,id 含非法字符抛 InvalidProfileIdError,
+            // 二者都被 toBridgeError 翻译成对应 BridgeErrorCode。
+            // 走 create 而非 upsert:upsert 看到 draft.id 命中 existing 时会默默切到
+            // 编辑分支,会让全局脚本 `profiles.create({id:'env_x', ...})` 在 id 冲突
+            // 时静默把别人的 profile 改了。create 抛错,语义安全。
+            const profile = this.profileStore.create(payload as ProfileDraft)
+            this.sendResponse(child, {
+              kind: 'response',
+              id: request.id,
+              ok: true,
+              value: profile
             })
             return
           }
@@ -850,6 +883,20 @@ export class ScriptBridge {
         occupiedBy: e.occupiedBy
       }
     }
+    if (e instanceof ProfileIdTakenError) {
+      return {
+        code: 'PROFILE_ID_TAKEN',
+        message: e.message,
+        existingId: e.existingId
+      }
+    }
+    if (e instanceof InvalidProfileIdError) {
+      return {
+        code: 'INVALID_PROFILE_ID',
+        message: e.message,
+        badId: e.badId
+      }
+    }
     const message = e instanceof Error ? e.message : String(e)
     const code: BridgeErrorCode = 'INTERNAL_ERROR'
     return { code, message }
@@ -884,6 +931,7 @@ const BRIDGE_METHODS: ReadonlySet<BridgeMethod> = new Set<BridgeMethod>([
   'profiles.get',
   'profiles.launch',
   'profiles.close',
+  'profiles.create',
   'runScript'
 ])
 

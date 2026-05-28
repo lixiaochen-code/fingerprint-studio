@@ -65,7 +65,16 @@ export interface ProfilesApi {
    * profile-scope 脚本调用会 reject GLOBAL_NOT_AVAILABLE。
    */
   close(id: string): Promise<void>
-  /** 创建 profile;draft.id 冲突时 throw ProfileIdTakenError */
+  /**
+   * 注册新 profile。
+   * - draft.id 留空:主进程自动生成 `env_<ts>_<rand>` 形式的 id
+   * - draft.id 显式指定:必须为 `[A-Za-z0-9._-]{1,64}`,冲突时 reject `PROFILE_ID_TAKEN`
+   *   (带 `existingId`),非法字符 reject `INVALID_PROFILE_ID`(带 `badId`)
+   * - draft.name 必填,其它字段(notes / startUrl / proxyId / fingerprint /
+   *   targetOs / enabledPluginIds)可选
+   *
+   * profile-scope 脚本调用会 reject GLOBAL_NOT_AVAILABLE。
+   */
   create(draft: ProfileDraft): Promise<BrowserProfile>
   delete(id: string): Promise<void>
   /**

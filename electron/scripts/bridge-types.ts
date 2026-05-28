@@ -37,16 +37,22 @@
  * - `profiles.launch` / `profiles.close`:全局脚本控制浏览器生命周期(只启动 / 显式
  *   关闭),不跑任何脚本。launch 已启动则 no-op 复用,close 没在跑则 no-op resolve;
  *   close 在 PROFILE_BUSY 时早返回不动浏览器。详见 launch-close 子 spec。
+ * - `profiles.create`:全局脚本批量注册新 profile。draft.id 可省(让 store 自动生成)
+ *   或显式指定;冲突时回 PROFILE_ID_TAKEN,非法字符回 INVALID_PROFILE_ID。
+ *   注:phase 6-runtime spec §Requirement 8 原本把 create / delete / setQueue 都列为
+ *   "GLOBAL_NOT_IMPL_YET 占位",这里把 create 提前实装(用户的批量注册诉求最高),
+ *   delete / setQueue 仍占位。
  * - `runScript`:全局脚本调度子 ScriptRun
  *
- * profiles 写接口(create / delete / setQueue)在 SDK 层就 throw `GLOBAL_NOT_IMPL_YET`,
- * 不会发起 BridgeRequest,因此不在本联合中。
+ * `delete / setQueue` 在 SDK 层就 throw `GLOBAL_NOT_IMPL_YET`,不会发起 BridgeRequest,
+ * 因此不在本联合中。
  */
 export type BridgeMethod =
   | 'profiles.list'
   | 'profiles.get'
   | 'profiles.launch'
   | 'profiles.close'
+  | 'profiles.create'
   | 'runScript'
 
 /**
@@ -106,12 +112,15 @@ export interface BridgeError {
  * ScriptBridge 兜底分支统一映射到 `INTERNAL_ERROR`。
  *
  * 各 code 的语义(详见 requirements §5):
- *   - `PROFILE_NOT_FOUND`:runScript 时 profileId 不在 ProfileStore;
+ *   - `PROFILE_NOT_FOUND`:runScript / launch / close 时 profileId 不在 ProfileStore;
  *   - `SCRIPT_NOT_FOUND`:runScript 时 scriptId 不在 ScriptStore;
  *   - `INVALID_SCOPE`:试图 runScript 一个 scope='global' 的脚本;
  *   - `PROFILE_BUSY`:profile 已被另一个 ScriptRun 占用(透传 ProfileBusyError);
+ *   - `PROFILE_ID_TAKEN`:profiles.create 时 draft.id 已被现存 profile 占用;
+ *   - `INVALID_PROFILE_ID`:profiles.create 时 draft.id 含非法字符
+ *     (合法字符:A-Z a-z 0-9 . _ -,长度 1..64);
  *   - `SCRIPT_STOPPED`:父全局 run 被 stop,联动到子 run 的 await reject;
- *   - `GLOBAL_NOT_IMPL_YET`:create/delete/setQueue 写接口占位
+ *   - `GLOBAL_NOT_IMPL_YET`:delete/setQueue 写接口占位
  *     (SDK 层就 throw,不会真的进入 ScriptBridge);
  *   - `INTERNAL_ERROR`:协议层 / 主进程兜底,任何未分类异常的 fallback。
  */
@@ -120,6 +129,8 @@ export type BridgeErrorCode =
   | 'SCRIPT_NOT_FOUND'
   | 'INVALID_SCOPE'
   | 'PROFILE_BUSY'
+  | 'PROFILE_ID_TAKEN'
+  | 'INVALID_PROFILE_ID'
   | 'SCRIPT_STOPPED'
   | 'GLOBAL_NOT_IMPL_YET'
   | 'INTERNAL_ERROR'

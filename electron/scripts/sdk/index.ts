@@ -2,7 +2,7 @@ import { BrowserHandle } from './browser'
 import { KvStore } from './kv'
 import type { BridgeClient } from './bridge-client'
 import type { BridgeError } from '../bridge-types'
-import type { BrowserProfile } from '../../types'
+import type { BrowserProfile, ProfileDraft } from '../../types'
 import type { ProfilesApi, RunScriptResult, ScriptApi, ScriptContext } from './types'
 
 /**
@@ -164,7 +164,15 @@ function makeGlobalScopeProfilesApi(bridge: BridgeClient): ProfilesApi {
       wrapBridgeRejection(bridge.call<null>('profiles.launch', { id })).then(() => undefined),
     close: (id: string) =>
       wrapBridgeRejection(bridge.call<null>('profiles.close', { id })).then(() => undefined),
-    create: () => notImplementedYet('create'),
+    // create 走 bridge → 主进程 ProfileStore.create。
+    // 失败码:
+    //   - PROFILE_ID_TAKEN:draft.id 已存在;`e.existingId` 透传
+    //   - INVALID_PROFILE_ID:draft.id 含非法字符;`e.badId` 透传
+    //   - INTERNAL_ERROR:其它(payload 形状错 / store 写盘失败)
+    // 这里**不**做幂等(若 id 冲突 → throw,而不是返回已有 profile);用户想"存在就跳过"
+    // 应该自己写 catch e.code === 'PROFILE_ID_TAKEN' 然后改 fallthrough 到 profiles.get。
+    create: (draft: ProfileDraft) =>
+      wrapBridgeRejection(bridge.call<BrowserProfile>('profiles.create', draft)),
     delete: () => notImplementedYet('delete'),
     setQueue: () => notImplementedYet('setQueue')
   }
