@@ -315,6 +315,20 @@ async function main(): Promise<void> {
       }
     }
 
+    // 用户 main() 自然返回时,可能还有 fire-and-forget 起的子任务挂在 bridge
+    // pending(典型场景:`runScript(...)` 没 await,把它当成"开了一条独立流水
+    // 线"用)。这里 await whenIdle 让父 fork 的 main() 等到所有 pending 清空再
+    // 继续走"completed"上报和退出。
+    //
+    // 与"用户主动停止"路径并不冲突:SIGTERM → abortController.abort() 会让
+    // 用户代码里的 await 抛错,catch 路径走的是下面的 catch 分支,根本不会到
+    // 这里的 whenIdle;dispose() 触发的 reject 也会让 pending 表迅速清空,
+    // 无 leak 风险。
+    //
+    // 与"app exit"路径也不冲突:主进程那侧 SIGTERM 级联仍会强行结束子进程,
+    // whenIdle 顶多多等几个 microtask。
+    await bridge.whenIdle()
+
     process.send?.({ type: 'completed', at: new Date().toISOString() })
     process.exitCode = 0
   } catch (error) {

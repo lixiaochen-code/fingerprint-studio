@@ -1,5 +1,4 @@
 import type {
-  BridgeError,
   BridgeMethod,
   BridgeRequest,
   BridgeResponse
@@ -25,10 +24,15 @@ import type {
  *     "为什么 reject 不 wrap")。
  * - `dispose(reason)` 把当前 pending 表里所有未完成调用一次性 reject,且让此后
  *   再调 `call()` 立即 reject;幂等(重复调 dispose 无副作用)。
+ * - `whenIdle()` 等到 pending 表清空再 resolve。bootstrap 在用户 main 函数自然
+ *   返回后 await 这个,保护用户 fire-and-forget 起的子任务不被父 fork 提前退出
+ *   杀掉(见 bootstrap.ts main() 末尾)。dispose 触发的 reject 也会让 pending
+ *   清空,所以"用户主动 stop"路径同样会让 whenIdle 解开。
  */
 export interface BridgeClient {
   call<T>(method: BridgeMethod, payload: unknown): Promise<T>
   dispose(reason: string): void
+  whenIdle(): Promise<void>
 }
 
 /**
@@ -82,6 +86,10 @@ export function createBridgeClient(): BridgeClient {
   // 会从这张表删条目。
   const pending = new Map<number, PendingEntry>()
 
+  // whenIdle() 注册的等待者:每次 pending 表清空时一次性触发。
+  // 设计:用数组而不是单 Promise,允许多处并发 await whenIdle()。
+  const idleWaiters: Array<() => void> = []
+
   // 一旦 `dispose()` 被调,该标志置 true。此后 `call()` 立即 reject 不再发包,
   // 也不再处理传入消息(虽然此时 process.on('message') listener 仍挂着,
   // 主进程一般也已经断 channel,正常情况下不再有消息;防御性兜底而已)。
@@ -134,6 +142,10 @@ export function createBridgeClient(): BridgeClient {
       // 直接透传 plain BridgeError(见上方"为什么 reject 不 wrap")。
       entry.reject(response.error)
     }
+    // pending 可能因这条删除而清空,触发 whenIdle() 等待者。放在 resolve/reject
+    // 之后调:让用户脚本中 await call(...) 的后续 then 链先跑(其中可能再发起
+    // 新的 call),避免 idleWaiters 在同一 microtask 里被错误触发又被加满。
+    notifyIdleWaiters()
   }
 
   // 注册 message 处理器。fork 进程内 `process` 上的 listener 在进程退出时由
@@ -168,6 +180,7 @@ export function createBridgeClient(): BridgeClient {
       const send = process.send?.bind(process)
       if (send === undefined) {
         pending.delete(id)
+        notifyIdleWaiters()
         reject(new Error('parent IPC channel is closed (process.send unavailable)'))
         return
       }
@@ -181,6 +194,7 @@ export function createBridgeClient(): BridgeClient {
       const ok = send(request)
       if (ok === false) {
         pending.delete(id)
+        notifyIdleWaiters()
         reject(new Error('parent IPC channel is closed'))
       }
     })
@@ -202,7 +216,36 @@ export function createBridgeClient(): BridgeClient {
       entry.reject(error)
     }
     pending.clear()
+    notifyIdleWaiters()
   }
 
-  return { call, dispose }
+  /**
+   * 等到 pending 表清空。如果当前已是空 → 立即 resolve。
+   *
+   * 为什么用 listener 数组而不是单个 Promise:同一时间可能有多处调用方在 await
+   * whenIdle()(理论上 bootstrap 只调一次,但 SDK 内部以后可能给用户也开放),
+   * 复用同一个"下一次清空"事件不会失误。
+   *
+   * 边界:**调用 whenIdle() 之后再 call(...) 又把 pending 加上去**——这种情况
+   * 我们不重置等待。等待的语义是"等到下一次 pending 变空就 resolve",符合调用
+   * 方期望。如果 pending 又被加满,whenIdle 已经 resolve 过,新的 await 才会
+   * 等下一次空。
+   */
+  function whenIdle(): Promise<void> {
+    if (pending.size === 0) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      idleWaiters.push(resolve)
+    })
+  }
+
+  function notifyIdleWaiters(): void {
+    if (pending.size !== 0) return
+    if (idleWaiters.length === 0) return
+    // 拍快照后清空,避免 resolve 回调中再次调 whenIdle 时塞进来的 listener
+    // 被本轮误触发(虽然此时 pending 已空,新的 listener 期望"下一次空")。
+    const waiters = idleWaiters.splice(0)
+    for (const w of waiters) w()
+  }
+
+  return { call, dispose, whenIdle }
 }
