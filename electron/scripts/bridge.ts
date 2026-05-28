@@ -141,7 +141,13 @@ export class ScriptBridge {
      * closeProfileBrowser:关闭单个 profile 的浏览器子进程。内部对"未在跑"是
      * no-op(只清表),与 profiles.close requirements §2.5 的 no-op resolve 语义对齐。
      */
-    private readonly closeProfileBrowser: (profileId: string) => Promise<void>
+    private readonly closeProfileBrowser: (profileId: string) => Promise<void>,
+    /**
+     * deleteProfileFromBridge:删 profile 的元数据 + 浏览器进程 + user-data 目录。
+     * 内部已包"先关浏览器再删盘"的顺序;bridge 这层在调用前需自行完成
+     * PROFILE_BUSY 互斥检查(见 profiles.delete 分支)。
+     */
+    private readonly deleteProfileFromBridge: (profileId: string) => Promise<void>
   ) {
     // 构造尾部订阅 runtime 事件总线,接通"父 run 消失"触发器(task 5)。
     //
@@ -421,6 +427,51 @@ export class ScriptBridge {
               id: request.id,
               ok: true,
               value: profile
+            })
+            return
+          }
+          case 'profiles.delete': {
+            // payload 形状:{ id: string }。校验失败走外层 INTERNAL_ERROR 兜底。
+            const payload = request.payload as { id?: unknown } | null | undefined
+            const id = payload?.id
+            if (typeof id !== 'string') {
+              throw new Error('profiles.delete: payload.id must be a string')
+            }
+            const profile = this.profileStore.get(id)
+            if (!profile) {
+              this.sendResponse(child, {
+                kind: 'response',
+                id: request.id,
+                ok: false,
+                error: { code: 'PROFILE_NOT_FOUND', message: `profile not found: ${id}` }
+              })
+              return
+            }
+            // 互斥检查:profile 上有活跃 ScriptRun → 不能删,会撕坏正在跑的脚本。
+            // 与 profiles.close 的 PROFILE_BUSY 检查同一种语义,顺序也固定:先 active
+            // 后 delete。
+            const occupiedBy = this.runtime.getActiveByProfile(id)
+            if (occupiedBy) {
+              this.sendResponse(child, {
+                kind: 'response',
+                id: request.id,
+                ok: false,
+                error: {
+                  code: 'PROFILE_BUSY',
+                  message: `profile ${id} is occupied by run ${occupiedBy.id} (script ${occupiedBy.scriptId})`,
+                  occupiedBy: { runId: occupiedBy.id, scriptId: occupiedBy.scriptId }
+                }
+              })
+              return
+            }
+            // deleteProfileFromBridge 内部:先关浏览器(等真退出)→ store.remove →
+            // rm -rf user-data 目录。任一步失败抛出 → 外层 catch 翻译为 INTERNAL_ERROR。
+            await this.deleteProfileFromBridge(id)
+            this.sendResponse(child, {
+              kind: 'response',
+              id: request.id,
+              ok: true,
+              value: null
             })
             return
           }
@@ -932,6 +983,7 @@ const BRIDGE_METHODS: ReadonlySet<BridgeMethod> = new Set<BridgeMethod>([
   'profiles.launch',
   'profiles.close',
   'profiles.create',
+  'profiles.delete',
   'runScript'
 ])
 

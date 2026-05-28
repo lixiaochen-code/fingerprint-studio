@@ -40,11 +40,13 @@
  * - `profiles.create`:全局脚本批量注册新 profile。draft.id 可省(让 store 自动生成)
  *   或显式指定;冲突时回 PROFILE_ID_TAKEN,非法字符回 INVALID_PROFILE_ID。
  *   注:phase 6-runtime spec §Requirement 8 原本把 create / delete / setQueue 都列为
- *   "GLOBAL_NOT_IMPL_YET 占位",这里把 create 提前实装(用户的批量注册诉求最高),
- *   delete / setQueue 仍占位。
+ *   "GLOBAL_NOT_IMPL_YET 占位",这里把 create / delete 提前实装(用户的批量注册诉求最高),
+ *   setQueue 仍占位。
+ * - `profiles.delete`:全局脚本删除 profile。互斥规则:profile 上有活跃 ScriptRun 时
+ *   reject PROFILE_BUSY(带 occupiedBy);否则先关浏览器(若在跑),再删 store + user-data。
  * - `runScript`:全局脚本调度子 ScriptRun
  *
- * `delete / setQueue` 在 SDK 层就 throw `GLOBAL_NOT_IMPL_YET`,不会发起 BridgeRequest,
+ * `setQueue` 在 SDK 层就 throw `GLOBAL_NOT_IMPL_YET`,不会发起 BridgeRequest,
  * 因此不在本联合中。
  */
 export type BridgeMethod =
@@ -53,6 +55,7 @@ export type BridgeMethod =
   | 'profiles.launch'
   | 'profiles.close'
   | 'profiles.create'
+  | 'profiles.delete'
   | 'runScript'
 
 /**

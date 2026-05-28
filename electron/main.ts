@@ -440,7 +440,11 @@ app.whenReady().then(async () => {
     // .then(() => undefined) 让类型契约严格匹配 Promise<void>,而非 Promise<string>。
     (profile) => ensureProfileRunningForScript(profile).then(() => undefined),
     // closeProfileBrowser:直接复用本文件内抽出的单条状态机函数。
-    terminateProfileBrowser
+    terminateProfileBrowser,
+    // deleteProfileFromBridge:bridge 调它来响应 profiles.delete 全局脚本调用。
+    // 内部已包"先关浏览器再删元数据再删 user-data 目录"的三步;互斥检查由 bridge 那侧
+    // 在调用前完成(getActiveByProfile),这条 callback 默认假设可以删了。
+    deleteProfile
   )
   scriptRuntime.setBridge(scriptBridge)
   scriptRuntime.on('event', (event: ScriptRuntimeEvent) => {
@@ -462,22 +466,9 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('profiles:remove', async (_event, id: string) => {
-    const profile = store.get(id)
-    const running = profileProcesses.get(id)
-    if (running && !running.killed) {
-      running.kill()
-      profileProcesses.delete(id)
-      // give Chromium a moment to release its file locks so the rm won't fight SingletonLock
-      await new Promise((resolve) => setTimeout(resolve, 300))
-    }
-    store.remove(id)
-    if (profile?.profilePath) {
-      try {
-        fs.rmSync(profile.profilePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
-      } catch (error) {
-        console.error('[profiles:remove] failed to delete profile dir', profile.profilePath, error)
-      }
-    }
+    // 渲染层 IPC 路径:用户从 UI 删,**不**做 PROFILE_BUSY 检查 —— 行为与历史一致
+    // (用户对自己删的环境负责);bridge 路径(profiles.delete)走互斥检查,见 ScriptBridge。
+    await deleteProfile(id)
   })
   ipcMain.handle('profiles:duplicate', (_event, id: string) => {
     const source = store.get(id)
@@ -747,6 +738,41 @@ async function terminateAllProfileBrowsers(): Promise<void> {
   await Promise.all(ids.map((id) => terminateProfileBrowser(id)))
   // profileProcesses 由各 terminateProfileBrowser 路径自行 delete;不在此再 clear,
   // 避免误删并发期间被其它代码 set 进的新条目
+}
+
+/**
+ * 删除单个 profile 的真源 + 浏览器进程 + user-data 目录。
+ *
+ * 顺序(违反就会出问题):
+ *   1) 先关浏览器(如果在跑)—— Chromium 还活着时持有 SingletonLock 等文件,
+ *      直接 fs.rmSync 会失败或留下残留
+ *   2) 等关闭真完成(terminateProfileBrowser 内部状态机:SIGTERM → 等 exit / 2.5s
+ *      → SIGKILL → 200ms 兜底);**不**用 setTimeout(300) 这种盲等
+ *   3) 从 ProfileStore 删元数据
+ *   4) rm -rf user-data 目录(maxRetries=3 容忍 macOS 上偶发的 lock 释放滞后)
+ *
+ * 调用方负责:
+ *   - 检查 profile 上是否有活跃 ScriptRun(PROFILE_BUSY)→ 这层逻辑放调用方,
+ *     因为 profiles:remove IPC 历史路径**没有**这个检查(用户从 UI 删允许"自己负责"),
+ *     而 bridge 路径要严格走互斥。两条调用方各自决策。
+ */
+async function deleteProfile(id: string): Promise<void> {
+  const profile = store.get(id)
+  // 先关浏览器,等真退出。terminateProfileBrowser 对"未在跑"是 no-op。
+  await terminateProfileBrowser(id)
+  store.remove(id)
+  if (profile?.profilePath) {
+    try {
+      fs.rmSync(profile.profilePath, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 200
+      })
+    } catch (error) {
+      console.error('[deleteProfile] failed to delete profile dir', profile.profilePath, error)
+    }
+  }
 }
 
 // 应用准备退出:先杀脚本子进程(自身已实现 graceful shutdown),再杀所有 profile 浏览器,

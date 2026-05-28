@@ -173,7 +173,14 @@ function makeGlobalScopeProfilesApi(bridge: BridgeClient): ProfilesApi {
     // 应该自己写 catch e.code === 'PROFILE_ID_TAKEN' 然后改 fallthrough 到 profiles.get。
     create: (draft: ProfileDraft) =>
       wrapBridgeRejection(bridge.call<BrowserProfile>('profiles.create', draft)),
-    delete: () => notImplementedYet('delete'),
+    // delete 走 bridge → 主进程 deleteProfile(关浏览器 + 删 store + 删 user-data)。
+    // 失败码:
+    //   - PROFILE_NOT_FOUND:目标不存在
+    //   - PROFILE_BUSY:profile 上有活跃 ScriptRun(带 occupiedBy)
+    //   - INTERNAL_ERROR:其它(rm -rf 失败 / 浏览器关不掉等)
+    // 不是幂等 —— 重复删已删的 id 会拿 PROFILE_NOT_FOUND;用户要"存在就删"自己写 catch。
+    delete: (id: string) =>
+      wrapBridgeRejection(bridge.call<null>('profiles.delete', { id })).then(() => undefined),
     setQueue: () => notImplementedYet('setQueue')
   }
 }

@@ -76,6 +76,15 @@ export interface ProfilesApi {
    * profile-scope 脚本调用会 reject GLOBAL_NOT_AVAILABLE。
    */
   create(draft: ProfileDraft): Promise<BrowserProfile>
+  /**
+   * 删除 profile。
+   * - 浏览器在跑会先被关掉(SIGTERM → 等 exit / 2.5s → SIGKILL),然后删 store
+   *   元数据和 user-data 目录
+   * - 若 profile 上有活跃 ScriptRun → reject 'PROFILE_BUSY'(带 occupiedBy)
+   * - profile 不存在 → reject 'PROFILE_NOT_FOUND'
+   *
+   * profile-scope 脚本调用会 reject GLOBAL_NOT_AVAILABLE。
+   */
   delete(id: string): Promise<void>
   /**
    * 改 profile 的某条队列。kind='on-create' / 'on-launch'。
