@@ -44,7 +44,7 @@
 
 | # | 步骤 | 期望 |
 |---|---|---|
-| D1 | 全局脚本里 `for (const p of (await profiles.list()).slice(0,2)) { const r = await runScript('script_child', p.id); log(p.name, r.run.status) }` | 子 run 依次出现在 ActiveRunsButton 抽屉;每个 status 都是 `'completed'` |
+| D1 | 全局脚本里 `for (const p of (await profiles.list()).slice(0,2)) { const r = await runScript('script_child', p.id); log(p.name, r.run.status) }` | 子 run 依次出现在 ActiveRunsButton 抽屉;每个 status 都是 `'succeeded'` |
 | D2 | 子脚本里加 `log(args.parentRunId, args.triggeredBy)`,跑 D1 | 子 run 日志命中 `parentRunId` 是父 run id,`triggeredBy === 'global-script'` |
 | D3 | `await runScript('nope_id', <some_pid>).catch(e => log(e.code))` | 命中 `'SCRIPT_NOT_FOUND'` |
 | D4 | 让 profile P 上手动跑一个长脚本占用,从全局脚本 `runScript('script_child', P).catch(e => log(e.code, e.occupiedBy?.runId))` | 命中 `'PROFILE_BUSY'` 且 occupiedBy 命中正在跑的那个 run id |
@@ -81,7 +81,7 @@
 | G4 | 在某 profile 上手动跑一个长脚本占用,全局脚本里 `profiles.delete(<that_pid>).catch(e => log(e.code, e.occupiedBy?.runId))` | 命中 `'PROFILE_BUSY'`,带 occupiedBy;**且 profile 仍然存在**(浏览器与盘没动) |
 | G5 | 已 launch (浏览器在跑)但**没**活跃 ScriptRun 的 profile,调 `profiles.delete(<id>)` | 浏览器先被关 → store 删 → user-data 目录消失;返回 resolve;**关键**:目录磁盘上要真的没了 |
 | G6 | 用户的 2 次循环用例(create + runScript + close + delete)端到端跑通 | 命中 0,1 日志;两个 profile 用完即焚 |
-| G7 | UI 路径删除一个**正在跑脚本**的 profile(回归 A5 的反面) | UI 直接删,不报 PROFILE_BUSY(用户说"自己负责");**这条注意会破坏正跑脚本,只在没有重要数据的 profile 上跑** |
+| G7 | UI 路径删除一个**正在跑脚本**的 profile(回归 A5 的反面) | UI 直接删,不报 PROFILE_BUSY(用户说"自己负责");**新决策(2026-05-29 G7 实测后定)**:删除时**顺手**走 SIGTERM 把跑在该 profile 上的 ScriptRun stop(status 标 `'stopped'`),run 日志最后一行能看到 `[runtime] profile <id> deleted, run terminated`;父 run(若该 run 是 global-script 的子调度)**不**被级联;**这条注意会顺手 stop 正跑脚本,只在没有重要数据的 profile 上跑** |
 
 ## H 组 — fire-and-forget 守护(commit bdd3fd9 — **本轮新增**)
 
@@ -90,11 +90,11 @@
 
 | # | 步骤 (写在全局脚本) | 期望 |
 |---|---|---|
-| H1 | ```js<br>export default async function main() {<br>  const ps = (await profiles.list()).slice(0, 2)<br>  for (const p of ps) runScript('script_child', p.id) // 注意没 await<br>  log('main returned')<br>}``` | 父 run 状态在 ActiveRunsButton 抽屉中先看到 2 个子 run + 1 个父 run;父 run **不**立刻变 completed,而是等 2 个子 run 都终态后,父 run 才变 completed |
+| H1 | ```js<br>export default async function main() {<br>  const ps = (await profiles.list()).slice(0, 2)<br>  for (const p of ps) runScript('script_child', p.id) // 注意没 await<br>  log('main returned')<br>}``` | 父 run 状态在 ActiveRunsButton 抽屉中先看到 2 个子 run + 1 个父 run;父 run **不**立刻变 `'succeeded'`,而是等 2 个子 run 都终态后,父 run 才变 `'succeeded'` |
 | H2 | H1 的子 run 日志 | 都正常出现(子脚本 log 命中) |
 | H3 | H1 中途手动 stop 父 run | 父 fork SIGTERM → user-await 被 abort,但本例 main 已返回;**预期**:子 run 仍跑完(因为父 fork 被杀时主进程级联了子 run 的 SIGTERM,但子 run 自己是独立 fork 不挂在父 fork 进程树上)。**这条行为可能与解读不一致,实测后回报**。 |
 | H4 | H1 配合 `await sleep(500); throw new Error('boom')` 在第 2 个 runScript 之后,Run | 父 run 走 catch 路径(failed)而非等 whenIdle;子 run 仍可能跑完(取决于父 fork SIGTERM 传播),实测后记录 |
-| H5 | 没有 fire-and-forget 的全局脚本(全部 await) | 行为不变,whenIdle 立即 resolve,父 run 正常 completed |
+| H5 | 没有 fire-and-forget 的全局脚本(全部 await) | 行为不变,whenIdle 立即 resolve,父 run 正常 `'succeeded'` |
 
 > ⚠️ H 组的 (c) 解读用户尚未明确确认。若 H1 的"父等子"语义不是用户想要的,请以
 > 用户当下意见为准重新设计。
