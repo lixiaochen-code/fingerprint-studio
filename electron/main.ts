@@ -744,21 +744,36 @@ async function terminateAllProfileBrowsers(): Promise<void> {
  * 删除单个 profile 的真源 + 浏览器进程 + user-data 目录。
  *
  * 顺序(违反就会出问题):
- *   1) 先关浏览器(如果在跑)—— Chromium 还活着时持有 SingletonLock 等文件,
+ *   1) 若 profile 上有活跃 ScriptRun → 先 stop 它(走和"用户在 ActiveRuns 抽屉
+ *      点 Stop"一样的路径,exit 后状态标 'stopped'),并等其 fork 真退出。
+ *      为什么不能晚:fork 还活着时往往持有浏览器 CDP 连接,先杀浏览器会让 fork
+ *      在最后一刻看到一堆 "Target closed" 类错误,日志难看;先 stop 干净。
+ *   2) 关浏览器(如果在跑)—— Chromium 还活着时持有 SingletonLock 等文件,
  *      直接 fs.rmSync 会失败或留下残留
- *   2) 等关闭真完成(terminateProfileBrowser 内部状态机:SIGTERM → 等 exit / 2.5s
+ *   3) 等关闭真完成(terminateProfileBrowser 内部状态机:SIGTERM → 等 exit / 2.5s
  *      → SIGKILL → 200ms 兜底);**不**用 setTimeout(300) 这种盲等
- *   3) 从 ProfileStore 删元数据
- *   4) rm -rf user-data 目录(maxRetries=3 容忍 macOS 上偶发的 lock 释放滞后)
+ *   4) 从 ProfileStore 删元数据
+ *   5) rm -rf user-data 目录(maxRetries=3 容忍 macOS 上偶发的 lock 释放滞后)
  *
  * 调用方负责:
  *   - 检查 profile 上是否有活跃 ScriptRun(PROFILE_BUSY)→ 这层逻辑放调用方,
  *     因为 profiles:remove IPC 历史路径**没有**这个检查(用户从 UI 删允许"自己负责"),
  *     而 bridge 路径要严格走互斥。两条调用方各自决策。
+ *   - bridge 路径调用前已 reject PROFILE_BUSY,这里 stopByProfile 必然 no-op;
+ *     UI 路径不查 BUSY,这一步真正发挥作用 —— 把 ScriptRun 顺手 stop 而不是放任
+ *     它在已被删的 profile 上空跑。语义对齐 §2026-05-29 用户决策(解读 1)。
  */
 async function deleteProfile(id: string): Promise<void> {
   const profile = store.get(id)
-  // 先关浏览器,等真退出。terminateProfileBrowser 对"未在跑"是 no-op。
+  // 一个 profile 同一时刻最多 1 个活跃 ScriptRun,getActiveByProfile 只会返回 0 或 1 条
+  // (互斥规则由 runtime.start 保证),故无需循环。
+  const activeRun = scriptRuntime.getActiveByProfile(id)
+  if (activeRun) {
+    await scriptRuntime.stop(activeRun.id, `profile ${id} deleted, run terminated`)
+    // 必须等 fork 真退出再继续,否则下面 terminateProfileBrowser → fs.rmSync 会和
+    // 仍持有 CDP 连接的 fork 抢资源(尤其 user-data 下的 sqlite lock)。
+    await scriptRuntime.waitForExit(activeRun.id)
+  }
   await terminateProfileBrowser(id)
   store.remove(id)
   if (profile?.profilePath) {

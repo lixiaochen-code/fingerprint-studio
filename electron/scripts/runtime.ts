@@ -278,9 +278,23 @@ export class ScriptRuntimeManager extends EventEmitter {
     return startedRun
   }
 
-  async stop(runId: string): Promise<void> {
+  /**
+   * 停止指定 ScriptRun。语义"等同于用户从 ActiveRuns 抽屉点 Stop":
+   *   - userStopped=true,exit 后 status 标 'stopped'(而非 'failed')
+   *   - SIGTERM → 3s graceful → SIGKILL
+   *
+   * 可选 reason 参数:外部调用方(例如"profile 被删除时顺手停掉这条 run")可以
+   * 传入一段说明,会被追加到 ScriptRun 自己的日志里,排障时一眼能看出"这条 run
+   * 不是用户 stop 的、不是脚本 bug,是因为外部某个动作把它顺手停了"。缺省时
+   * 不写日志,与历史调用路径(IPC stop / shutdown)行为一致。
+   */
+  async stop(runId: string, reason?: string): Promise<void> {
     const entry = this.active.get(runId)
     if (!entry) return
+    if (reason) {
+      // 写到 ScriptRun 自己的 log 文件 + 推一条 log 事件给 UI,与脚本自己 log() 的渠道一致。
+      this.appendLog(runId, 'info', `[runtime] ${reason}`)
+    }
     entry.userStopped = true
     entry.abort.abort()
     try {
@@ -291,6 +305,30 @@ export class ScriptRuntimeManager extends EventEmitter {
     entry.killTimer = setTimeout(() => {
       try { entry.child.kill('SIGKILL') } catch {}
     }, GRACEFUL_SHUTDOWN_MS)
+  }
+
+  /**
+   * 等待指定 run 从 active 集合中真正消失(进程 exit 事件触发完 finalize)。
+   *
+   * 用途:外部动作(profile 删除)依赖"run 真死了"这一刻才能继续 —— 比如不能在
+   * fork 还活着时 fs.rmSync user-data 目录,Chromium 仍持有 SingletonLock。
+   *
+   * 实装走轮询 (50ms 步进) 而不是基于 'active-changed' 事件订阅,因为:
+   *   1) listener 在 active map 改完之后再 emit,订阅与轮询时机相同
+   *   2) 轮询不需要管"如果 run 已经退了"的边界(直接首轮命中即返回)
+   *   3) 调用方少,这条路径不进热路径
+   *
+   * timeoutMs 默认给到 GRACEFUL_SHUTDOWN_MS + 1s buffer,覆盖 SIGTERM→SIGKILL 全程。
+   * 超时不抛错,resolve 即可 —— 外层动作不会被一个执拗的 fork 卡死,极端情况留给
+   * 应用退出时 before-quit 钩子兜底。
+   */
+  async waitForExit(runId: string, timeoutMs = GRACEFUL_SHUTDOWN_MS + 1000): Promise<void> {
+    if (!this.active.has(runId)) return
+    const startedAt = Date.now()
+    while (this.active.has(runId)) {
+      if (Date.now() - startedAt > timeoutMs) return
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
   }
 
   /** 停止所有活跃 run；UI 还没做之前这个接口方便手工清理孤儿 */
