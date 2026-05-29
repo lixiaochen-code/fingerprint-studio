@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: TT-01 (PR-1 合规检查)，T-12 not started
+> Continue From: T-12 not started (Phase 1 complete: T-01..T-11 done, TT-01 pass)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -79,13 +79,13 @@
   - files: .kiro/steering/process.md
   - verify: front-matter `inclusion: always`；正文引用 docs/process/ 全部 7 份文档（已被 Kiro 自动加载，验证通过）
 
-- [ ] **TT-01** PR-1 合规检查（手工）
-  - status: todo
+- [x] **TT-01** PR-1 合规检查（手工）
+  - status: done (pass)
   - method: 手工
   - verify: ls 验证所有文件存在 → 模拟新 agent 读 AGENTS.md → docs/process/00-overview.md 流转通顺；symlink 在 macOS 上正常 cat
-  - executed-at: 
-  - result: 
-  - evidence: 
+  - executed-at: 2026-05-29 19:02
+  - result: pass — 7 份规范 + 8 模板 + AGENTS.md + 4 symlinks（全部解析正确）+ .kiro/steering/process.md 已被 Kiro 自动加载（证据：用户消息中收到 inline 规则注入）
+  - evidence: ls 输出与 git log 已记录
 
 > **PR-1 完成后**：在 main 上 merge，开 PR-2 分支（同一 change 分支即可，本 change 全程一个分支跑完）。
 
