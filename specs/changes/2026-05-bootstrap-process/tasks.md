@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-16 (PR-4 archive 迁移)
+> Continue From: T-17 (phase-6-runtime archive)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -135,11 +135,11 @@
 
 ## Phase 4: archive 历史迁移（PR-4）
 
-- [ ] **T-16** 迁移 .kiro/specs/global-scripts-and-queues → specs/archive/desktop/scripts/2026-05-global-scripts-and-queues
-  - status: todo
-  - commit: 
-  - files: 整目录 git mv；新增 STATUS.md (status=archived, legacy=true)
-  - verify: 目录到位；STATUS.md 标 legacy
+- [x] **T-16** 迁移 .kiro/specs/global-scripts-and-queues → specs/archive/desktop/scripts/2026-05-global-scripts-and-queues
+  - status: done
+  - commit: (this commit)
+  - files: git mv + 新增 STATUS.md (legacy=true)；删除 archive/desktop/scripts/.gitkeep
+  - verify: 目录到位；STATUS.md 标 legacy=true 且引用 baseline
 
 - [ ] **T-17** 迁移 .kiro/specs/global-scripts-phase-6-runtime → specs/archive/desktop/scripts/2026-05-phase-6-runtime
   - status: todo
