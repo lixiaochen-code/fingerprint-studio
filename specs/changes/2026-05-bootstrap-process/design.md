@@ -372,3 +372,8 @@ When working on this repo, always start by reading those files.
 - [ ] `specs/archive/desktop/scripts/` 下有三个 legacy 归档
 - [ ] `specs/baseline/desktop/{stealth,scripts}/spec.md` 内含 OpenSpec 风格的 Current Capabilities + Legacy 附录
 - [ ] symlink 在 macOS 下正常工作（Windows 用户 fallback 写在 AGENTS.md）
+
+
+## Revision Log
+
+- 2026-05-29 | revision 1 | 用户授权将 bootstrap change 自身简化为单 PR（原 §8 规划 5 个独立 PR）。理由：本次是项目第一份 change，没有 CI、用户、团队，5 PR 的治理价值在 bootstrap 阶段为零；commit 级粒度已保留（每 task 一 commit）；docs/process/ 不修改，5 PR 仍是后续大 change 的默认建议。本次 change 走单 PR + merge commit 合并到 main。
