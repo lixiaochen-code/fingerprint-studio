@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-12 not started (Phase 1 complete: T-01..T-11 done, TT-01 pass)
+> Continue From: T-13 not started (T-12 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -91,11 +91,11 @@
 
 ## Phase 2: specs/ 目录骨架（PR-2）
 
-- [ ] **T-12** 创建 `specs/baseline/` 目录骨架与占位 README
-  - status: todo
-  - commit: 
-  - files: specs/baseline/desktop/{profiles,proxies,scripts,stealth,kernel}/.gitkeep, specs/baseline/{backend,shared}/README.md
-  - verify: 树形结构与 design §2 一致；backend/shared 有 README 说明"暂空，未来扩展"
+- [x] **T-12** 创建 `specs/baseline/` 目录骨架与占位 README
+  - status: done
+  - commit: (this commit)
+  - files: specs/baseline/desktop/{profiles,proxies,kernel}/spec.md (TBD-stub), specs/baseline/{backend,shared}/README.md
+  - verify: 树形结构与 design §2 一致；backend/shared 有 README 说明"暂空，未来扩展"；profiles/proxies/kernel 三模块有 TBD spec.md（stealth/scripts 留空待 PR-3 迁入）
 
 - [ ] **T-13** 创建 `specs/archive/` 目录骨架
   - status: todo
