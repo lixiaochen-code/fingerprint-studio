@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-06 not started (T-01..T-05 done)
+> Continue From: T-07 not started (T-01..T-06 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -43,9 +43,9 @@
   - files: docs/process/03-development.md
   - verify: 9 节骨架完整；含 commit 格式规则、task 阈值、跨电脑续作约定、small-change 简化路径
 
-- [ ] **T-06** 创建 `docs/process/04-testing.md`
-  - status: todo
-  - commit: 
+- [x] **T-06** 创建 `docs/process/04-testing.md`
+  - status: done
+  - commit: (this commit)
   - files: docs/process/04-testing.md
   - verify: 9 节骨架完整；含两层测试模型、TT 编号规则、Execution Log 格式
 
