@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-10 not started (T-01..T-09 done)
+> Continue From: T-11 not started (T-01..T-10 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -67,9 +67,9 @@
   - files: AGENTS.md, CLAUDE.md, GEMINI.md, .cursorrules, .github/copilot-instructions.md
   - verify: AGENTS.md ~80 行；其余 4 文件 git ls-files -s mode = 120000（symlink，已验证）
 
-- [ ] **T-10** 创建 `docs/PROJECT_GUIDE.md`（迁原 AGENT.md 项目知识部分）
-  - status: todo
-  - commit: 
+- [x] **T-10** 创建 `docs/PROJECT_GUIDE.md`（迁原 AGENT.md 项目知识部分）
+  - status: done
+  - commit: (this commit)
   - files: docs/PROJECT_GUIDE.md
   - verify: 含 12 节中应迁入的 10 节（见 design §10 映射表）；路径已更新指向 specs/baseline/
 
