@@ -280,4 +280,11 @@ C. **rebase merge**：commit 串联到 main，无 merge commit
   - 决定测试两层模型 + TT 编号
   - 决定失败留痕在 release-notes.md 追加 Failed Attempt 段
 
-- 待补 | 用户回答 Open Questions 后此处追加修订记录
+- 2026-05-29 | proposal v2 (approved) | 用户授权 agent 按其倾向决定 Q1-Q7：
+  - Q1: 沿用 `_cross` 模块，不另建 `_meta`
+  - Q2: 模板结构化标题用英文，正文中文
+  - Q3: 模板字段全部必填，允许"N/A + 一句话说明"
+  - Q4: approved 状态由 agent 在用户明确说"approved"后切换并 commit；本次 change 适用此规则
+  - Q5: bootstrap change 归档到 `specs/archive/_cross/2026-05-bootstrap-process/`
+  - Q6: 归档时保留 STATUS.md（含 Log 历史）
+  - Q7: 5 个 PR 用 merge commit 方式合并到 main
