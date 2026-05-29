@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-04 not started (T-01..T-03 done)
+> Continue From: T-05 not started (T-01..T-04 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -31,9 +31,9 @@
   - files: docs/process/01-requirements.md
   - verify: 9 节骨架完整；含 OpenSpec 多轮 Q&A 模式说明；含 GIVEN/WHEN/THEN scenario 写法
 
-- [ ] **T-04** 创建 `docs/process/02-design.md`
-  - status: todo
-  - commit: 
+- [x] **T-04** 创建 `docs/process/02-design.md`
+  - status: done
+  - commit: (this commit)
   - files: docs/process/02-design.md
   - verify: 9 节骨架完整；含 ADR 触发条件；含跨端设计指引（后端预留）
 
