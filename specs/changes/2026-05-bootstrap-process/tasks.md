@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-14 not started (T-13 done; PR-2 logical complete)
+> Continue From: 迁移阶段（T-14 起）已应用户要求暂停。规范文档（T-01..T-13、TT-01、TT-02）建立完毕。等用户指令再启动 T-14。
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
