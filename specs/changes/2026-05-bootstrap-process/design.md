@@ -377,3 +377,4 @@ When working on this repo, always start by reading those files.
 ## Revision Log
 
 - 2026-05-29 | revision 1 | 用户授权将 bootstrap change 自身简化为单 PR（原 §8 规划 5 个独立 PR）。理由：本次是项目第一份 change，没有 CI、用户、团队，5 PR 的治理价值在 bootstrap 阶段为零；commit 级粒度已保留（每 task 一 commit）；docs/process/ 不修改，5 PR 仍是后续大 change 的默认建议。本次 change 走单 PR + merge commit 合并到 main。
+- 2026-05-29 | revision 2 | T-14/T-15/T-19 合并删除时机：原计划 PR-3 仅迁移、PR-5 才删除原文件。改为迁移即删除，避免迁移后双份并存导致"哪个是真"的歧义。tasks.md 内任务描述同步更新。

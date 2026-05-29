@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-14 not started (T-13 done; PR-2 logical complete)
+> Continue From: T-15 not started (T-14 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -113,11 +113,11 @@
 
 ## Phase 3: baseline 内容迁移（PR-3）
 
-- [ ] **T-14** 迁移 anti-detection.md → specs/baseline/desktop/stealth/spec.md
-  - status: todo
-  - commit: 
-  - files: specs/baseline/desktop/stealth/spec.md, docs/specs/anti-detection.md (删除留待 PR-5)
-  - verify: spec.md 顶部有 OpenSpec 风格 Current Capabilities 段（至少 3 条 Requirement + 各自 Scenario）；末尾 Legacy Design Document 段含 anti-detection.md 全文
+- [x] **T-14** 迁移 anti-detection.md → specs/baseline/desktop/stealth/spec.md
+  - status: done
+  - commit: (this commit)
+  - files: specs/baseline/desktop/stealth/spec.md (new); docs/specs/anti-detection.md (deleted, no longer needed since content is in Legacy appendix)
+  - verify: spec.md 顶部有 OpenSpec 风格 Current Capabilities 段（7 条 Requirement）；末尾 Legacy Design Document 段含 anti-detection.md 全文；原 docs/specs/anti-detection.md 已删除
 
 - [ ] **T-15** 迁移 scripting.md + global-scripts-and-queues.md → specs/baseline/desktop/scripts/spec.md
   - status: todo
