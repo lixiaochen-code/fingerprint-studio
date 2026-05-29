@@ -103,13 +103,13 @@
   - files: specs/archive/desktop/{profiles,proxies,scripts,stealth,kernel}/.gitkeep, specs/archive/{backend,shared,_cross}/.gitkeep
   - verify: 树形结构与 design §2 一致（已 find specs 验证）
 
-- [ ] **TT-02** PR-2 合规检查
-  - status: todo
+- [x] **TT-02** PR-2 合规检查
+  - status: done (pass)
   - method: 手工
-  - verify: tree -L 4 specs/ 输出与 design §2 完全一致
-  - executed-at: 
-  - result: 
-  - evidence: 
+  - verify: find specs -type d 输出与 design §2 完全一致
+  - executed-at: 2026-05-29 19:08
+  - result: pass — 22 个目录全部就位（baseline 7 + archive 8 + changes 2 + 根 + bootstrap-process 4）
+  - evidence: find 输出已记录
 
 ## Phase 3: baseline 内容迁移（PR-3）
 
