@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-09 not started (T-01..T-08 done)
+> Continue From: T-10 not started (T-01..T-09 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -61,11 +61,11 @@
   - files: docs/process/06-archive.md
   - verify: 9 节骨架完整；含模块归档树规则、_cross 分类、归档只读约定、无观察期声明
 
-- [ ] **T-09** 创建 `AGENTS.md` 主文件 + symlinks
-  - status: todo
-  - commit: 
+- [x] **T-09** 创建 `AGENTS.md` 主文件 + symlinks
+  - status: done
+  - commit: (this commit)
   - files: AGENTS.md, CLAUDE.md, GEMINI.md, .cursorrules, .github/copilot-instructions.md
-  - verify: AGENTS.md ~100 行；其余 4 文件 `git ls-files -s` mode = 120000（symlink）
+  - verify: AGENTS.md ~80 行；其余 4 文件 git ls-files -s mode = 120000（symlink，已验证）
 
 - [ ] **T-10** 创建 `docs/PROJECT_GUIDE.md`（迁原 AGENT.md 项目知识部分）
   - status: todo
