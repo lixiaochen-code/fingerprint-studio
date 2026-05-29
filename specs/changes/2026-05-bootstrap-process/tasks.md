@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-02 not started (T-01 done)
+> Continue From: T-03 not started (T-01, T-02 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -19,11 +19,11 @@
   - verify: ls 看到 8 个文件，每份内含完整字段骨架（含 `N/A` 提示）
   - note: 模板字段全部必填，允许 N/A
 
-- [ ] **T-02** 创建 `docs/process/00-overview.md`（流程总规范）
-  - status: todo
-  - commit: 
+- [x] **T-02** 创建 `docs/process/00-overview.md`（流程总规范）
+  - status: done
+  - commit: (this commit)
   - files: docs/process/00-overview.md
-  - verify: 含 8 节（哲学/状态机图/切换条件/环节入口/小需求路径/工具中立/后端预告/FAQ），≤300 行
+  - verify: 含 8 节（哲学/状态机图/切换条件/环节入口/小需求路径/工具中立/后端预告/FAQ），≤300 行 (146)
 
 - [ ] **T-03** 创建 `docs/process/01-requirements.md`
   - status: todo
