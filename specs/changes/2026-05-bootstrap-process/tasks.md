@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-08 not started (T-01..T-07 done)
+> Continue From: T-09 not started (T-01..T-08 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -55,9 +55,9 @@
   - files: docs/process/05-release.md
   - verify: 9 节骨架完整；含 10 步上线流水线、PR 描述模板、失败分级处理（含 Failed Attempt 留痕格式）
 
-- [ ] **T-08** 创建 `docs/process/06-archive.md`
-  - status: todo
-  - commit: 
+- [x] **T-08** 创建 `docs/process/06-archive.md`
+  - status: done
+  - commit: (this commit)
   - files: docs/process/06-archive.md
   - verify: 9 节骨架完整；含模块归档树规则、_cross 分类、归档只读约定、无观察期声明
 
