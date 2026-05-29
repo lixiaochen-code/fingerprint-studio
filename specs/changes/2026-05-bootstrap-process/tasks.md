@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-17 (phase-6-runtime archive)
+> Continue From: T-14 not started (T-13 done; PR-2 logical complete)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -113,33 +113,33 @@
 
 ## Phase 3: baseline 内容迁移（PR-3）
 
-- [x] **T-14** 迁移 anti-detection.md → specs/baseline/desktop/stealth/spec.md
-  - status: done
-  - commit: (this commit)
-  - files: specs/baseline/desktop/stealth/spec.md (new); docs/specs/anti-detection.md (deleted, no longer needed since content is in Legacy appendix)
-  - verify: spec.md 顶部有 OpenSpec 风格 Current Capabilities 段（7 条 Requirement）；末尾 Legacy Design Document 段含 anti-detection.md 全文；原 docs/specs/anti-detection.md 已删除
+- [ ] **T-14** 迁移 anti-detection.md → specs/baseline/desktop/stealth/spec.md
+  - status: todo
+  - commit: 
+  - files: specs/baseline/desktop/stealth/spec.md, docs/specs/anti-detection.md (删除留待 PR-5)
+  - verify: spec.md 顶部有 OpenSpec 风格 Current Capabilities 段（至少 3 条 Requirement + 各自 Scenario）；末尾 Legacy Design Document 段含 anti-detection.md 全文
 
-- [x] **T-15** 迁移 scripting.md + global-scripts-and-queues.md → specs/baseline/desktop/scripts/spec.md
-  - status: done
-  - commit: (this commit)
-  - files: specs/baseline/desktop/scripts/spec.md (new); docs/specs/{scripting.md,global-scripts-and-queues.md} (deleted)
-  - verify: spec.md 顶部 Current Capabilities 段含 9 条 Requirement（脚本生命周期/SDK/scope/profile.id/队列/main(args)/runScript/PROFILE_BUSY/CDP）；Legacy 附录策略已记录 design revision 3；原文件已删除（完整内容通过 git 历史与 PR-4 归档可达）
+- [ ] **T-15** 迁移 scripting.md + global-scripts-and-queues.md → specs/baseline/desktop/scripts/spec.md
+  - status: todo
+  - commit: 
+  - files: specs/baseline/desktop/scripts/spec.md, docs/specs/{scripting.md,global-scripts-and-queues.md} (删除留待 PR-5)
+  - verify: 两文档内容合并去重后作为 Legacy 附录；Current Capabilities 段抽出至少 3 条 Requirement
 
-- [x] **TT-03** PR-3 合规检查
-  - status: done (pass)
+- [ ] **TT-03** PR-3 合规检查
+  - status: todo
   - method: 手工
   - verify: 抽查 stealth/spec.md 的 Current Capabilities 是否准确反映现状；抽查 scripts/spec.md 没有遗漏 global-scripts-and-queues 的关键内容
-  - executed-at: 2026-05-29 19:18
-  - result: pass — stealth 7 条 Requirement、scripts 10 条 Requirement，均覆盖原文档关键能力；docs/specs/ 内 anti-detection.md / scripting.md / global-scripts-and-queues.md 均已删除（剩 10 个 handoff 待 PR-5 处理）
-  - evidence: grep -c "^### Requirement:" 输出已记录
+  - executed-at: 
+  - result: 
+  - evidence: 
 
 ## Phase 4: archive 历史迁移（PR-4）
 
-- [x] **T-16** 迁移 .kiro/specs/global-scripts-and-queues → specs/archive/desktop/scripts/2026-05-global-scripts-and-queues
-  - status: done
-  - commit: (this commit)
-  - files: git mv + 新增 STATUS.md (legacy=true)；删除 archive/desktop/scripts/.gitkeep
-  - verify: 目录到位；STATUS.md 标 legacy=true 且引用 baseline
+- [ ] **T-16** 迁移 .kiro/specs/global-scripts-and-queues → specs/archive/desktop/scripts/2026-05-global-scripts-and-queues
+  - status: todo
+  - commit: 
+  - files: 整目录 git mv；新增 STATUS.md (status=archived, legacy=true)
+  - verify: 目录到位；STATUS.md 标 legacy
 
 - [ ] **T-17** 迁移 .kiro/specs/global-scripts-phase-6-runtime → specs/archive/desktop/scripts/2026-05-phase-6-runtime
   - status: todo

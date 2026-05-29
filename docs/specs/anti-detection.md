@@ -1,167 +1,3 @@
-# Baseline: desktop/stealth
-
-> 真理之源：反检测体系（A/B/C 三轨）。新 change 通过 delta 修改本文档。
-> 历史完整设计见末尾的 Legacy Design Document 附录。
-
-## Current Capabilities
-
-> 以下 Requirement 是从历史设计文档抽出的高层能力描述。后续 change 通过 delta 增删改本节内容。
-
-### Requirement: 三轨反检测架构
-
-系统提供三条相互独立的反检测路线（A: Stealth Inject、B: Rebrowser puppeteer、C: Cloak/itbrowser），通过 fingerprintMode 选择。
-
-#### Scenario: 默认走 A 轨
-- GIVEN 用户未设置 fingerprintMode
-- WHEN 启动 profile
-- THEN 内核选择 chromium + stealth 注入扩展
-- AND 用户脚本通过 rebrowser-puppeteer-core 操作浏览器（B 轨同时生效）
-
-#### Scenario: macOS 无 C 轨可用
-- GIVEN 宿主为 macOS
-- WHEN 用户尝试切换 fingerprintMode = `cloak` 或 `itbrowser`
-- THEN 系统 fallback 到 A 轨（chromium + stealth）
-- AND 不报错，但日志记录 fallback 原因
-
-#### Scenario: Windows 优先 itbrowser
-- GIVEN 宿主为 Windows
-- AND itbrowser 已下载到 userData
-- WHEN 用户偏好 mode = `itbrowser`
-- THEN 启动 itbrowser 内核，传 `--itbrowser=<fingerprint.json>`
-- AND 不挂 stealth 扩展（C 轨与 A 轨互斥）
-
-### Requirement: A 轨 Stealth Inject 不留 toString 痕迹
-
-stealth 注入 patch 必须通过 nativeToString proxy 包装所有被 hook 的函数，使站点检测 `Object.getOwnPropertyDescriptor(...).get.toString()` 时返回 `[native code]`。
-
-#### Scenario: toString 检测
-- GIVEN profile 启动且默认 stealth 全开
-- WHEN 站点 JS 执行 `Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgent').get.toString()`
-- THEN 返回字符串 `"function get userAgent() { [native code] }"`
-- AND 不暴露 inject 痕迹
-
-### Requirement: A 轨 patch 独立可关
-
-每个 stealth patch 通过环境变量 `AUTO_REGISTRY_STEALTH_DISABLE` 灰度关闭，便于二分定位。
-
-#### Scenario: 关掉 iframe patch
-- GIVEN 启动命令含 `AUTO_REGISTRY_STEALTH_DISABLE=iframe,battery`
-- WHEN profile 启动
-- THEN iframe 与 battery patch 不注入
-- AND 其他 patch 正常生效
-
-#### Scenario: 完全回滚到 legacy inject
-- GIVEN `AUTO_REGISTRY_FINGERPRINT_MODE=extension`
-- WHEN profile 启动
-- THEN 走 LEGACY_INJECT 路径（旧 inject）
-- AND 不挂任何 stealth patch
-
-### Requirement: B 轨 rebrowser-puppeteer 替换
-
-子进程 bootstrap 必须把 `require('puppeteer-core')` 与 `require('puppeteer')` 路由到 `rebrowser-puppeteer-core`，规避 Runtime.enable 痕迹。
-
-#### Scenario: 用户脚本无感替换
-- GIVEN 用户脚本写 `import puppeteer from 'puppeteer-core'`
-- WHEN 脚本子进程启动
-- THEN `_resolveFilename` 拦截把 specifier 路由到 rebrowser
-- AND `require.resolve('puppeteer-core')` 输出含 `rebrowser-puppeteer-core` 的路径
-- AND API 调用与 puppeteer-core 行为一致
-
-#### Scenario: 严格相等匹配
-- GIVEN bootstrap 拦截使用 `===` 比较 specifier
-- WHEN rebrowser 内部加载 `puppeteer-core/lib/cjs/...` 子模块
-- THEN 不被拦截（避免递归）
-- AND 子模块走 rebrowser 自身的解析路径
-
-### Requirement: targetOs 钳制
-
-stealth 路径下，`fingerprint.ts::resolveTargetOs` 永远返回宿主 OS，UI 上的"目标系统"下拉框仅作展示。跨 OS 伪装走 cloak / itbrowser 内核。
-
-#### Scenario: macOS 宿主声明 Windows 目标
-- GIVEN 宿主 macOS，UI 选择 targetOs = `Windows`
-- WHEN profile 启动走 stealth 路径
-- THEN resolveTargetOs 返回 `mac`
-- AND navigator.userAgent / sec-ch-ua 走 Chromium macOS 默认值
-
-### Requirement: stealth 不传与 client hints 矛盾的 CLI flag
-
-启动 chromium 时禁止传 `--user-agent` / `--lang` / `--force-webrtc-ip-handling-policy`。这些会与 Chromium 内部 client hints 矛盾，被 Turnstile 直接判 bot。
-
-#### Scenario: client hints 一致
-- GIVEN profile 启动
-- WHEN 检查启动参数
-- THEN 启动参数不含上述三个 flag
-- AND navigator.userAgent / sec-ch-ua / userAgentData 自动一致
-
-### Requirement: stealth 必传特定 CLI flag
-
-启动 chromium 时必须传 `--disable-blink-features=AutomationControlled` 与 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`。
-
-#### Scenario: webdriver 在内核层为 false
-- GIVEN profile 启动且默认 mode
-- WHEN JS 执行 `navigator.webdriver`
-- THEN 返回 `false`
-- AND 不需要任何 JS hook（内核层已生效）
-
-## Verification References
-
-| 检测点 | 工具 | 期望 |
-|---|---|---|
-| toString 痕迹 | DevTools | `[native code]` |
-| webdriver | DevTools | false |
-| chrome 完整 | DevTools | window.chrome.runtime 存在 |
-| plugins | DevTools | navigator.plugins.length === 5 |
-| permissions / Notification 一致 | DevTools | state 一致 |
-| iframe 一致 | DevTools | f.contentWindow.navigator.webdriver === false |
-| 综合 | https://abrahamjuliot.github.io/creepjs/ | trust score 较 extension 显著提升 |
-| Turnstile | https://browser-compat.turnstile.workers.dev/ | challenge 通过 |
-| ChatGPT 实测 | 5 分钟连续操作 | 不陷入验证循环 |
-
-## Code Map
-
-```
-electron/
-├── stealth/                       # A 轨主目录
-│   ├── index.ts                   # buildStealthInjectScript + togglesFromEnv
-│   └── patches/
-│       ├── nativeToString.ts      # 基础（必先注入）
-│       ├── navigator.ts
-│       ├── chromeRuntime.ts
-│       ├── permissions.ts
-│       ├── iframe.ts
-│       ├── graphics.ts
-│       ├── audioWebrtc.ts
-│       └── battery.ts
-├── fingerprint.ts                 # ensureFingerprintExtension(profile, mode)
-├── kernel.ts                      # selectKernel(profile, mode)
-├── main.ts                        # fingerprintMode()
-└── scripts/
-    ├── sdk/{browser,types}.ts     # B 轨：import rebrowser-puppeteer-core
-    └── bootstrap.ts               # installModuleInterceptions
-```
-
-## Decision Log
-
-> 历史关键决策保留以备查；新决策若涉及全局约定应在新 change 的 design.md 里触发 ADR。
-
-- **抽出 `electron/stealth/` 目录**：fingerprint.ts 内联 inject 字符串膨胀到 800+ 行不可读；每个 patch 独立 toggle 也方便灰度
-- **保留 `'extension'` mode**：legacy inject 留作快速回滚通道，而非删除
-- **保留 `puppeteer-core` 不删**：Monaco 类型源 + B 路线的快速回滚
-- **bootstrap 拦截 specifier 严格 `===`**：防止递归拦截 rebrowser 内部子模块
-- **`--remote-debugging-port=0` 不动**：脚本子系统命脉，127.0.0.1 隔离已足够
-
-## Roadmap
-
-- **Phase 1**（完成）：Stealth Inject（A 路线）+ legacy 回滚通道
-- **Phase 2**（完成）：Rebrowser puppeteer（B 路线）
-- **Phase 3**（待办）：Settings UI + SettingsStore 持久化 + C 路线显式 UI 切换
-
----
-
-## Legacy Design Document
-
-> 以下为原 `docs/specs/anti-detection.md` 全文，作为历史细节存档。后续 change 不要修改本附录；所有更新通过 delta 反映到 Current Capabilities 段。
-
 # 反检测体系 · Spec
 
 > auto-registry 的反检测能力按"三轨独立、各管一层"组织。本文档是这套架构的工程真源,改动代码前请先读。
@@ -222,7 +58,7 @@ Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgent').get.toString()
 
 ### 实现
 
-模块组织:[electron/stealth/](../../../../../electron/stealth/),按 patch 拆分。每个 patch 文件 export 一段浏览器侧 JS 字符串,由 [electron/stealth/index.ts](../../../../../electron/stealth/index.ts) 的 `buildStealthInjectScript(toggles)` 按 toggle 拼成最终 inject.js。
+模块组织:[electron/stealth/](../../electron/stealth/),按 patch 拆分。每个 patch 文件 export 一段浏览器侧 JS 字符串,由 [electron/stealth/index.ts](../../electron/stealth/index.ts) 的 `buildStealthInjectScript(toggles)` 按 toggle 拼成最终 inject.js。
 
 | Patch 文件 | 覆盖检测点 |
 |-----------|----------|
@@ -278,10 +114,10 @@ AUTO_REGISTRY_FINGERPRINT_MODE=extension pnpm dev
 | 文件 | 改动 |
 |------|------|
 | `package.json` | `+ rebrowser-puppeteer-core ^24.x`(与 puppeteer-core 24.x 主版本对齐);**保留** puppeteer-core 作 Monaco 类型源 + 快速回滚通道 |
-| `electron/scripts/sdk/browser.ts` | `import puppeteer from 'rebrowser-puppeteer-core'` |
-| `electron/scripts/sdk/types.ts` | `import type { Browser, Page } from 'rebrowser-puppeteer-core'` |
-| `electron/scripts/bootstrap.ts` | `installAutoRegistryModule` → `installModuleInterceptions`,合并劫持 `puppeteer-core` / `puppeteer` specifier → rebrowser 路径 |
-| `src/lib/script-typings.ts` | 加 `declare module 'rebrowser-puppeteer-core' { export * from 'puppeteer-core' }`,Monaco 对两个 specifier 都有补全 |
+| [electron/scripts/sdk/browser.ts](../../electron/scripts/sdk/browser.ts) | `import puppeteer from 'rebrowser-puppeteer-core'` |
+| [electron/scripts/sdk/types.ts](../../electron/scripts/sdk/types.ts) | `import type { Browser, Page } from 'rebrowser-puppeteer-core'` |
+| [electron/scripts/bootstrap.ts](../../electron/scripts/bootstrap.ts) | `installAutoRegistryModule` → `installModuleInterceptions`,合并劫持 `puppeteer-core` / `puppeteer` specifier → rebrowser 路径 |
+| [src/lib/script-typings.ts](../../src/lib/script-typings.ts) | 加 `declare module 'rebrowser-puppeteer-core' { export * from 'puppeteer-core' }`,Monaco 对两个 specifier 都有补全 |
 
 ### 用户脚本侧无感
 
@@ -307,7 +143,7 @@ AUTO_REGISTRY_FINGERPRINT_MODE=extension pnpm dev
 
 **已部分集成**:
 
-- `electron/kernel.ts` `selectKernel` 根据 mode 选择内核
+- [electron/kernel.ts](../../electron/kernel.ts) `selectKernel` 根据 mode 选择内核
 - CloakBrowser:`--fingerprint=<seed>` + `--fingerprint-webrtc-ip=auto` 已在 `buildLaunchArgs` 里
 - itbrowser:`--itbrowser=<fingerprint.json>` 已在 `buildLaunchArgs` 里
 
