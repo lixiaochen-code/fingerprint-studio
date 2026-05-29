@@ -8,3 +8,4 @@ dist-electron/
 *.local
 test-script/
 release/
+.claude/
