@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-01 not started
+> Continue From: T-02 not started (T-01 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -12,9 +12,9 @@
 
 ## Phase 1: 流程文档与入口（PR-1）
 
-- [ ] **T-01** 创建 `docs/process/templates/` 8 份模板
-  - status: todo
-  - commit: 
+- [x] **T-01** 创建 `docs/process/templates/` 8 份模板
+  - status: done
+  - commit: (this commit)
   - files: docs/process/templates/{proposal,design,tasks,test-plan,release-notes,retrospective,STATUS,delta-spec}.md
   - verify: ls 看到 8 个文件，每份内含完整字段骨架（含 `N/A` 提示）
   - note: 模板字段全部必填，允许 N/A
