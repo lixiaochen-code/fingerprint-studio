@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-15 not started (T-14 done)
+> Continue From: TT-03 (PR-3 检查) then T-16 (PR-4 archive 迁移)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -119,11 +119,11 @@
   - files: specs/baseline/desktop/stealth/spec.md (new); docs/specs/anti-detection.md (deleted, no longer needed since content is in Legacy appendix)
   - verify: spec.md 顶部有 OpenSpec 风格 Current Capabilities 段（7 条 Requirement）；末尾 Legacy Design Document 段含 anti-detection.md 全文；原 docs/specs/anti-detection.md 已删除
 
-- [ ] **T-15** 迁移 scripting.md + global-scripts-and-queues.md → specs/baseline/desktop/scripts/spec.md
-  - status: todo
-  - commit: 
-  - files: specs/baseline/desktop/scripts/spec.md, docs/specs/{scripting.md,global-scripts-and-queues.md} (删除留待 PR-5)
-  - verify: 两文档内容合并去重后作为 Legacy 附录；Current Capabilities 段抽出至少 3 条 Requirement
+- [x] **T-15** 迁移 scripting.md + global-scripts-and-queues.md → specs/baseline/desktop/scripts/spec.md
+  - status: done
+  - commit: (this commit)
+  - files: specs/baseline/desktop/scripts/spec.md (new); docs/specs/{scripting.md,global-scripts-and-queues.md} (deleted)
+  - verify: spec.md 顶部 Current Capabilities 段含 9 条 Requirement（脚本生命周期/SDK/scope/profile.id/队列/main(args)/runScript/PROFILE_BUSY/CDP）；Legacy 附录策略已记录 design revision 3；原文件已删除（完整内容通过 git 历史与 PR-4 归档可达）
 
 - [ ] **TT-03** PR-3 合规检查
   - status: todo
