@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: TT-03 (PR-3 检查) then T-16 (PR-4 archive 迁移)
+> Continue From: T-16 (PR-4 archive 迁移)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -125,13 +125,13 @@
   - files: specs/baseline/desktop/scripts/spec.md (new); docs/specs/{scripting.md,global-scripts-and-queues.md} (deleted)
   - verify: spec.md 顶部 Current Capabilities 段含 9 条 Requirement（脚本生命周期/SDK/scope/profile.id/队列/main(args)/runScript/PROFILE_BUSY/CDP）；Legacy 附录策略已记录 design revision 3；原文件已删除（完整内容通过 git 历史与 PR-4 归档可达）
 
-- [ ] **TT-03** PR-3 合规检查
-  - status: todo
+- [x] **TT-03** PR-3 合规检查
+  - status: done (pass)
   - method: 手工
   - verify: 抽查 stealth/spec.md 的 Current Capabilities 是否准确反映现状；抽查 scripts/spec.md 没有遗漏 global-scripts-and-queues 的关键内容
-  - executed-at: 
-  - result: 
-  - evidence: 
+  - executed-at: 2026-05-29 19:18
+  - result: pass — stealth 7 条 Requirement、scripts 10 条 Requirement，均覆盖原文档关键能力；docs/specs/ 内 anti-detection.md / scripting.md / global-scripts-and-queues.md 均已删除（剩 10 个 handoff 待 PR-5 处理）
+  - evidence: grep -c "^### Requirement:" 输出已记录
 
 ## Phase 4: archive 历史迁移（PR-4）
 
