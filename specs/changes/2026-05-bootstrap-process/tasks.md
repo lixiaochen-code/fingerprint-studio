@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-03 not started (T-01, T-02 done)
+> Continue From: T-04 not started (T-01..T-03 done)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -25,9 +25,9 @@
   - files: docs/process/00-overview.md
   - verify: 含 8 节（哲学/状态机图/切换条件/环节入口/小需求路径/工具中立/后端预告/FAQ），≤300 行 (146)
 
-- [ ] **T-03** 创建 `docs/process/01-requirements.md`
-  - status: todo
-  - commit: 
+- [x] **T-03** 创建 `docs/process/01-requirements.md`
+  - status: done
+  - commit: (this commit)
   - files: docs/process/01-requirements.md
   - verify: 9 节骨架完整；含 OpenSpec 多轮 Q&A 模式说明；含 GIVEN/WHEN/THEN scenario 写法
 
