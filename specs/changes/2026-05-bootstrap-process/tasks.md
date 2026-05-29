@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-11 not started (T-01..T-10 done)
+> Continue From: TT-01 (PR-1 合规检查)，T-12 not started
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -73,11 +73,11 @@
   - files: docs/PROJECT_GUIDE.md
   - verify: 含 12 节中应迁入的 10 节（见 design §10 映射表）；路径已更新指向 specs/baseline/
 
-- [ ] **T-11** 创建 `.kiro/steering/process.md`（Kiro 自动加载入口）
-  - status: todo
-  - commit: 
+- [x] **T-11** 创建 `.kiro/steering/process.md`（Kiro 自动加载入口）
+  - status: done
+  - commit: (this commit)
   - files: .kiro/steering/process.md
-  - verify: front-matter `inclusion: always`；正文引用 docs/process/ 全部 7 份文档
+  - verify: front-matter `inclusion: always`；正文引用 docs/process/ 全部 7 份文档（已被 Kiro 自动加载，验证通过）
 
 - [ ] **TT-01** PR-1 合规检查（手工）
   - status: todo
