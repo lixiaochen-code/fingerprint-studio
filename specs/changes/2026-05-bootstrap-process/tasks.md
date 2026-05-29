@@ -1,6 +1,6 @@
 # Tasks: 2026-05-bootstrap-process
 
-> Continue From: T-13 not started (T-12 done)
+> Continue From: T-14 not started (T-13 done; PR-2 logical complete)
 > Last updated: 2026-05-29 by initial-author
 
 ## Conventions
@@ -97,11 +97,11 @@
   - files: specs/baseline/desktop/{profiles,proxies,kernel}/spec.md (TBD-stub), specs/baseline/{backend,shared}/README.md
   - verify: 树形结构与 design §2 一致；backend/shared 有 README 说明"暂空，未来扩展"；profiles/proxies/kernel 三模块有 TBD spec.md（stealth/scripts 留空待 PR-3 迁入）
 
-- [ ] **T-13** 创建 `specs/archive/` 目录骨架
-  - status: todo
-  - commit: 
+- [x] **T-13** 创建 `specs/archive/` 目录骨架
+  - status: done
+  - commit: (this commit)
   - files: specs/archive/desktop/{profiles,proxies,scripts,stealth,kernel}/.gitkeep, specs/archive/{backend,shared,_cross}/.gitkeep
-  - verify: 树形结构与 design §2 一致
+  - verify: 树形结构与 design §2 一致（已 find specs 验证）
 
 - [ ] **TT-02** PR-2 合规检查
   - status: todo
