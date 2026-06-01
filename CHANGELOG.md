@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.7 — 2026-06-01
+
+### Process / Tooling
+
+- 新增 `pnpm run archive <slug>`：自动化 change 归档（改 status 字段 + 追加 Log + git mv + 自检），根除手动归档的 status 字段笔误
+- 06-archive.md 流程更新；新增 §8.1"元数据笔误可修正"例外条款
+- 应用二进制无变化
+
+详见 [archive-helper release notes](specs/archive/_cross/2026-06-archive-helper/release-notes.md)。
+
 ## v0.1.6 — 2026-06-01
 
 ### Build / Tooling
