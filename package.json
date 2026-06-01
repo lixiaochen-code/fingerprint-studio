@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.autoregistry.app",
-    "productName": "Auto Registry",
+    "productName": "Fingerprint Studio",
     "asar": true,
     "asarUnpack": [
       "**/node_modules/7zip-bin/**",

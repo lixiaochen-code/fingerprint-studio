@@ -1,6 +1,8 @@
-# Auto Registry
+# Fingerprint Studio
 
 跨境账号环境管理桌面 MVP。它用 Electron 管理多个独立浏览器环境，每个环境有自己的持久化会话、代理和指纹配置。
+
+> 内部代码标识符仍使用历史名 `auto-registry`（SDK 包名、env 前缀 `AUTO_REGISTRY_*`、bundle id `com.autoregistry.app`、userData 子目录 `registry-data/`）。改名仅影响展示名与仓库名，不破坏现有数据兼容。
 
 ## 功能
 

@@ -8,7 +8,9 @@
 
 ## 1. 项目一句话
 
-`auto-registry` 是一个基于 Electron + React + TypeScript 的桌面应用，用来管理多个相互隔离的跨境电商浏览器环境。每个环境拥有独立的 user-data 目录、代理、指纹配置，可按需启停对应的 Chromium / CloakBrowser / itbrowser 内核。
+`fingerprint-studio` 是一个基于 Electron + React + TypeScript 的桌面应用，用来管理多个相互隔离的跨境电商浏览器环境。每个环境拥有独立的 user-data 目录、代理、指纹配置，可按需启停对应的 Chromium / CloakBrowser / itbrowser 内核。
+
+> 注：仓库历史名为 `auto-registry`，2026-06 改名为 `fingerprint-studio`。内部代码标识符（SDK 包名、env 前缀、bundle id 等）仍保留旧名以确保兼容。
 
 ## 2. 必读三件套
 

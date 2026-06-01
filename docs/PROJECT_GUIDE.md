@@ -3,6 +3,8 @@
 > 项目特定知识库：架构、技术约束、反检测策略、IPC 模型、命名规范。
 > 流程相关内容不在本文件，见 `docs/process/`。
 > 入口在 `AGENTS.md`，不要直接读这个文件作为入口。
+>
+> **改名说明**：项目仓库 2026-06 改名为 `fingerprint-studio`（旧名 `auto-registry`）。内部代码标识符全部保留旧名（SDK 包名 `auto-registry`、env 前缀 `AUTO_REGISTRY_*`、bundle id `com.autoregistry.app`、IPC 命名空间 `window.registry`、userData 子目录 `registry-data/`），用户脚本与现有应用数据兼容。
 
 ---
 
