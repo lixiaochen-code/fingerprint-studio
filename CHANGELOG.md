@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.3 — 2026-06-01
+
+### Chore
+
+- 应用展示名 `Auto Registry` → `Fingerprint Studio`
+- 仓库名 `auto--registry` → `fingerprint-studio`（git remote 同步）
+- 内部代码标识符（SDK 包名、env 前缀、bundle id、IPC 命名空间、userData 路径）保持不变 → 现有用户应用 / 数据 / 用户脚本完全兼容
+
+### Known Issues
+
+- 仍仅 arm64 mac 产物可用；x64 build issue 未解决（同 v0.1.2）
+
+详见 [rename-repo-sync release notes](specs/archive/_cross/2026-06-rename-repo-sync/release-notes.md)（即将归档）。
+
 ## v0.1.2 — 2026-06-01
 
 ### Process
