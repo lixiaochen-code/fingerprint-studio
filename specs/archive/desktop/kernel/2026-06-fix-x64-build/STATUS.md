@@ -3,7 +3,7 @@
 - slug: 2026-06-fix-x64-build
 - module: kernel
 - type: fix
-- status: ready-to-ship
+- status: archived
 - branch: change/kernel/2026-06-fix-x64-build
 - created-at: 2026-06-01
 - last-updated: 2026-06-01

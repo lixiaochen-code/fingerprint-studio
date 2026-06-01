@@ -1,6 +1,6 @@
 # Tasks: 2026-06-process-validators
 
-> Continue From: T-01 not started
+> Continue From: T-02 not started (T-01 done)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -9,10 +9,10 @@
 
 ## T-01 编写 scripts/validate-specs.mjs
 
-- status: todo
-- commit: 
-- files: scripts/validate-specs.mjs
-- verify: 零第三方 import；含 STATUS 解析 + 6 类检查 + error/warning 报告 + exit code
+- status: done
+- commit: (this commit)
+- files: scripts/validate-specs.mjs; (顺带修正) specs/archive/desktop/kernel/2026-06-fix-x64-build/STATUS.md status 字段笔误
+- verify: 零第三方 import；含 STATUS 解析 + 6 类检查 + error/warning 报告 + exit code；首跑即抓到 fix-x64-build 归档时 status 字段没改成 archived 的真 bug（已修正）
 
 ## T-02 挂 package.json validate:specs script
 
