@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.6 — 2026-06-01
+
+### Build / Tooling
+
+- 新增 `pnpm run dist:check`：构建前校验 electron 下载缓存 SHA256，自动删除损坏文件，根治弱网导致的 `flate: corrupt input` 构建失败
+- 所有 `dist:*` 前置 `dist:check`
+- `scripts/verify-electron-cache.mjs` 支持 delete（默认）/ --strict（CI）/ --redownload（curl 重下+校验）三模式
+- 应用二进制无功能变化
+
+详见 [build-resilience release notes](specs/archive/desktop/kernel/2026-06-build-resilience/release-notes.md)（即将归档）。
+
 ## v0.1.5 — 2026-06-01
 
 ### Process / Tooling
