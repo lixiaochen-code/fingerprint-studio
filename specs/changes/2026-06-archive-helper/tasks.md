@@ -1,6 +1,6 @@
 # Tasks: 2026-06-archive-helper
 
-> Continue From: T-02 not started (T-01 + TT-01 done)
+> Continue From: TT-02 自归档（需先 ship）+ TT-03
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -16,17 +16,17 @@
 
 ## T-02 挂 package.json archive script
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: package.json
-- verify: pnpm run archive 可调用；usage 提示存在
+- verify: pnpm run archive 可调用；无 slug 时输出 usage 提示 exit 1
 
 ## T-03 06-archive 文档更新
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: docs/process/06-archive.md
-- verify: §4 含 `pnpm run archive <slug>` 用法（替代手动 mv 步骤）；新增"元数据笔误可修正"细则；当前手动流程仍保留为应急
+- verify: §4 步骤 3 改为 `pnpm run archive <slug>`（保留应急手动流程）；新增 §8.1 元数据笔误修正例外条款
 
 ## TT-01 错误场景验证
 
