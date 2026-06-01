@@ -174,12 +174,25 @@ pnpm run build
 pnpm install             # 安装依赖
 pnpm run dev             # 启动开发模式（同时启 Vite + Electron）
 pnpm run build           # 全量构建 + 类型检查（CI/提交前必跑）
-pnpm run dist:mac        # 构建 macOS 安装包
+pnpm run dist:check      # 校验 electron 下载缓存 SHA256（dist:* 已自动前置）
+pnpm run dist:mac        # 构建 macOS 安装包（先 dist:check 再 build）
 pnpm run dist:win        # 构建 Windows 安装包
 pnpm run dist:linux      # 构建 Linux AppImage
+pnpm run validate:specs  # 校验流程合规（specs/ 结构与状态一致性）
 ```
 
 本地 Node 版本建议 ≥ 20.x，与 Electron 39 匹配。
+
+### 弱网下的 build（electron cache 损坏）
+
+弱网下 electron-builder 自动下载的 electron zip 可能损坏（SHA 不匹配），表现为 dist 报 `flate: corrupt input`。所有 `dist:*` 已前置 `dist:check` 自动删除损坏缓存让其重下。若重下仍坏（网络持续不稳），手动主动重下 + 校验：
+
+```bash
+node scripts/verify-electron-cache.mjs --redownload   # 删坏文件 + curl 重下 + 复校 SHA
+node scripts/verify-electron-cache.mjs --strict        # 仅校验，坏则报错退出（CI 用）
+```
+
+可选：设置 `ELECTRON_MIRROR` 走更稳定的镜像。背景见归档 `specs/archive/desktop/kernel/2026-06-fix-x64-build/` 与 `2026-06-build-resilience/`。
 
 ## 9. 文件命名规范（摘要）
 
