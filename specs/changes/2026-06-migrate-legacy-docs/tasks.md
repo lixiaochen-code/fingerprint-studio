@@ -1,6 +1,6 @@
 # Tasks: 2026-06-migrate-legacy-docs
 
-> Continue From: T-07 not started (T-01..T-06 done; Phase 3 complete)
+> Continue From: TT-01 + TT-02 (Phase 1-4 全部完成；进入测试)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -53,15 +53,15 @@
 
 ## Phase 4: 旧目录与 AGENT.md 清理
 
-- [ ] **T-07** 删除空 docs/specs/ 目录
-  - status: todo
-  - commit: 
-  - files: rmdir docs/specs/（迁完应已空）
+- [x] **T-07** 删除空 docs/specs/ 目录
+  - status: done
+  - commit: (this commit, batched with T-08)
+  - files: rmdir docs/specs/
   - verify: ls docs/ 不见 specs/
 
-- [ ] **T-08** 删除根 AGENT.md
-  - status: todo
-  - commit: 
+- [x] **T-08** 删除根 AGENT.md
+  - status: done
+  - commit: (this commit; batched with T-07)
   - files: rm AGENT.md
   - verify: ls 项目根不见 AGENT.md
 
