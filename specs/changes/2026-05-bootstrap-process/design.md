@@ -377,3 +377,4 @@ When working on this repo, always start by reading those files.
 ## Revision Log
 
 - 2026-05-29 | revision 1 | 用户授权将 bootstrap change 自身简化为单 PR（原 §8 规划 5 个独立 PR）。理由：本次是项目第一份 change，没有 CI、用户、团队，5 PR 的治理价值在 bootstrap 阶段为零；commit 级粒度已保留（每 task 一 commit）；docs/process/ 不修改，5 PR 仍是后续大 change 的默认建议。本次 change 走单 PR + merge commit 合并到 main。
+- 2026-05-29 | revision 4 | scope 收窄：用户指令"先定义规范文档，迁移后面做"。本 change 范围调整为只建立规范文档 + 目录骨架 + agent 入口；历史文档迁移（原 §8 PR-3/4/5）整体移出，单独开 change `2026-05-migrate-legacy-docs` 处理。已 revert T-14/T-15/T-16/TT-03。design revision 2 与 revision 3（关于迁移策略的细节决策）随之失效。tasks.md 同步更新：T-14 ~ T-21、TT-03 ~ TT-05 全部从本 change 任务清单移除，搬到新 change。

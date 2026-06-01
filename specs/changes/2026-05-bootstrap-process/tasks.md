@@ -111,84 +111,14 @@
   - result: pass — 22 个目录全部就位（baseline 7 + archive 8 + changes 2 + 根 + bootstrap-process 4）
   - evidence: find 输出已记录
 
-## Phase 3: baseline 内容迁移（PR-3）
 
-- [ ] **T-14** 迁移 anti-detection.md → specs/baseline/desktop/stealth/spec.md
-  - status: todo
-  - commit: 
-  - files: specs/baseline/desktop/stealth/spec.md, docs/specs/anti-detection.md (删除留待 PR-5)
-  - verify: spec.md 顶部有 OpenSpec 风格 Current Capabilities 段（至少 3 条 Requirement + 各自 Scenario）；末尾 Legacy Design Document 段含 anti-detection.md 全文
+## Phase 3-5: 历史文档迁移（已移出本 change scope）
 
-- [ ] **T-15** 迁移 scripting.md + global-scripts-and-queues.md → specs/baseline/desktop/scripts/spec.md
-  - status: todo
-  - commit: 
-  - files: specs/baseline/desktop/scripts/spec.md, docs/specs/{scripting.md,global-scripts-and-queues.md} (删除留待 PR-5)
-  - verify: 两文档内容合并去重后作为 Legacy 附录；Current Capabilities 段抽出至少 3 条 Requirement
+> 2026-05-29 proposal v3 / design revision 4：用户指令"先定义规范文档，迁移后面做"。
+> 原 T-14 ~ T-21、TT-03 ~ TT-05 全部移到新 change：`2026-05-migrate-legacy-docs`，走完整流程处理。
+> 本 change 自此只剩 Phase 1（规范文档）+ Phase 2（目录骨架）+ Phase 6（spec 测试 / 发版 / 归档）。
 
-- [ ] **TT-03** PR-3 合规检查
-  - status: todo
-  - method: 手工
-  - verify: 抽查 stealth/spec.md 的 Current Capabilities 是否准确反映现状；抽查 scripts/spec.md 没有遗漏 global-scripts-and-queues 的关键内容
-  - executed-at: 
-  - result: 
-  - evidence: 
+## Phase 6: 测试与发版
 
-## Phase 4: archive 历史迁移（PR-4）
-
-- [ ] **T-16** 迁移 .kiro/specs/global-scripts-and-queues → specs/archive/desktop/scripts/2026-05-global-scripts-and-queues
-  - status: todo
-  - commit: 
-  - files: 整目录 git mv；新增 STATUS.md (status=archived, legacy=true)
-  - verify: 目录到位；STATUS.md 标 legacy
-
-- [ ] **T-17** 迁移 .kiro/specs/global-scripts-phase-6-runtime → specs/archive/desktop/scripts/2026-05-phase-6-runtime
-  - status: todo
-  - commit: 
-  - files: 同上；不带 .config.kiro
-  - verify: 目录到位；不含 .config.kiro
-
-- [ ] **T-18** 迁移 .kiro/specs/global-scripts-profile-launch-close → specs/archive/desktop/scripts/2026-05-profile-launch-close
-  - status: todo
-  - commit: 
-  - files: 同上
-  - verify: 目录到位
-
-- [ ] **TT-04** PR-4 合规检查
-  - status: todo
-  - method: 手工
-  - verify: ls -la .kiro/specs/ 不再含 global-scripts-*；archive 三目录 STATUS.md 都标 legacy
-  - executed-at: 
-  - result: 
-  - evidence: 
-
-## Phase 5: handoff 迁移与旧目录清理（PR-5）
-
-- [ ] **T-19** 迁移 docs/specs/handoff-*.md + test-checklist-*.md → docs/handoffs/
-  - status: todo
-  - commit: 
-  - files: git mv 11 个文件
-  - verify: docs/handoffs/ 含全部历史文档；docs/specs/ 仅剩 anti-detection / scripting / global-scripts-and-queues 三个待删
-
-- [ ] **T-20** 删除空 docs/specs/ + AGENT.md
-  - status: todo
-  - commit: 
-  - files: 删 docs/specs/ 三文件 + AGENT.md
-  - verify: ls docs/ 不见 specs/；ls 项目根不见 AGENT.md
-
-- [ ] **T-21** 清理 .kiro/specs/ 空目录
-  - status: todo
-  - commit: 
-  - files: rmdir .kiro/specs/{global-scripts-and-queues,global-scripts-phase-6-runtime,global-scripts-profile-launch-close}/.config.kiro 等遗留 + 整 .kiro/specs/ 目录
-  - verify: ls .kiro/ 仅剩 steering/
-
-- [ ] **TT-05** PR-5 全量合规检查
-  - status: todo
-  - method: 手工
-  - verify: 模拟新 agent 流程 → AGENTS.md → 00-overview → 选一个旧 module 的 baseline 看能否理解；docs/handoffs/ 列表完整
-  - executed-at: 
-  - result: 
-  - evidence: 
-
-## Phase 6: 测试与发版（在所有 task 完成后）
-
-详见 test-plan.md 的 spec-level TT 与 release-notes.md。
+> Phase 1 + 2 全部 task done 后，本 change 进入 testing 阶段。
+> 详见 `test-plan.md`（spec-level TT）与 `release-notes.md`（发版）。

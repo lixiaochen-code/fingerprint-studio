@@ -20,21 +20,21 @@
 **做**：
 
 - 在 `docs/process/` 下建立 7 份规范文档：1 份总规范 + 6 份环节规范 + 模板集
-- 在 `specs/`（仓库根，工具中立）下建立 baseline / changes / archive 三层目录
+- 在 `specs/`（仓库根，工具中立）下建立 baseline / changes / archive 三层目录骨架（不含历史内容迁移）
 - 建立 `AGENTS.md` 作为业界惯例的 agent 入口；`CLAUDE.md`、`GEMINI.md` 等用 symlink 指向它
-- 把现有 `docs/specs/anti-detection.md`、`scripting.md` 等架构性文档迁到 `specs/baseline/desktop/<module>/spec.md`
-- 把 `.kiro/specs/global-scripts-*` 三个已完成的 spec 迁到 `specs/archive/desktop/scripts/`，补齐归档资料
-- 把 `docs/specs/handoff-*.md` 迁到 `docs/handoffs/`
+- 建立 `docs/PROJECT_GUIDE.md`（迁原 AGENT.md 项目知识部分；不含 AGENT.md 本身的删除）
+- 建立 `.kiro/steering/process.md` 让 Kiro 自动加载流程文档
 - 在 `specs/baseline/{backend,shared}/` 预留后端目录（仅 README 占位）
-- 通过 5 个独立 PR 分批完成，每个 PR 可独立 review、独立合并
+- 单 PR 合并到 main（design revision 1 决定）
 
-**不做**：
+**不做**（已从 scope 移出，由后续 change `2026-05-migrate-legacy-docs` 处理）：
 
-- 不动 `electron/`、`src/`、`apps/` 物理结构（monorepo 重构留待未来真正引入后端时做）
-- 不引入新工具链（不装 OpenSpec CLI、不加 CI、不搭测试框架）；这些可作为后续 change
-- 不重写历史 baseline 为严格 OpenSpec 格式（保留为 Legacy Design Document 附录，新 delta 才严格按格式写）
-- 不为已归档的 3 个 spec 补造测试记录或失败记录（它们的 handoff 文档已是真实历史）
-- 不处理 git 历史里 `.claude/` 等历史问题（如需公开仓库再走单独 change）
+- 不迁移 `docs/specs/anti-detection.md` / `scripting.md` / `global-scripts-and-queues.md` 到 `specs/baseline/desktop/<module>/`
+- 不迁移 `.kiro/specs/global-scripts-*` 到 `specs/archive/desktop/scripts/`
+- 不迁移 `docs/specs/handoff-*.md` 到 `docs/handoffs/`
+- 不删除 `docs/specs/` 与 `AGENT.md`（保留共存到下一 change）
+- 不动 `electron/`、`src/`、`apps/` 物理结构
+- 不引入新工具链（OpenSpec CLI、CI、测试框架）；这些可作为后续 change
 
 ## 3. Approach（大方向，不写实现细节）
 
@@ -288,3 +288,5 @@ C. **rebase merge**：commit 串联到 main，无 merge commit
   - Q5: bootstrap change 归档到 `specs/archive/_cross/2026-05-bootstrap-process/`
   - Q6: 归档时保留 STATUS.md（含 Log 历史）
   - Q7: 5 个 PR 用 merge commit 方式合并到 main
+
+- 2026-05-29 | proposal v3 (scope reduced) | 用户指令"先定义规范文档，迁移后面做"。把历史文档迁移（PR-3/4/5 内容）从 scope 移出，本 change 仅覆盖"建立规范文档 + 目录骨架 + agent 入口"。已用 git revert 回滚 T-14/T-15/T-16/TT-03 的 commit。迁移工作单独开 change `2026-05-migrate-legacy-docs` 走完整流程处理。
