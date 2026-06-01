@@ -50,9 +50,9 @@
 
 ## TT-03 validate + build green
 
-- status: todo
+- status: pass
 - method: 自动
 - verify: pnpm run validate:specs 0 error；pnpm run build exit 0
-- executed-at: 
-- result: 
-- evidence: 
+- executed-at: 2026-06-01
+- result: pass — validate 9 archived 0 error；build 20.97s green
+- evidence: 运行输出
