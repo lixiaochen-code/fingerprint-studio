@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.4 — 2026-06-01
+
+### Fixed
+
+- 修复 mac x64 安装包构建失败（v0.1.2 / v0.1.3 仅有 arm64）。根因：electron x64 缓存 zip 网络下载损坏（SHA256 不匹配）。修复：手动 curl 下载 + SHA 校验
+- **首次双架构发版**：同时提供 arm64（Apple Silicon）与 x64（Intel）mac 安装包
+
+详见 [fix-x64-build release notes](specs/archive/desktop/kernel/2026-06-fix-x64-build/release-notes.md)（即将归档）。
+
 ## v0.1.3 — 2026-06-01
 
 ### Chore
