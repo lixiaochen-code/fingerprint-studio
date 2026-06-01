@@ -1,6 +1,6 @@
 # Tasks: 2026-06-process-validators
 
-> Continue From: TT-01..TT-03 (testing)
+> Continue From: release (bump v0.1.5, no installer rebuild) + archive
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions

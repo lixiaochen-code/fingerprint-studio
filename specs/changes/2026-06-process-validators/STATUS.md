@@ -3,7 +3,7 @@
 - slug: 2026-06-process-validators
 - module: _cross
 - type: process
-- status: in-progress
+- status: ready-to-ship
 - branch: change/_cross/2026-06-process-validators
 - created-at: 2026-06-01
 - last-updated: 2026-06-01
@@ -14,6 +14,8 @@
 - 2026-06-01 | approved | user "继续" batch authorization; no open questions
 - 2026-06-01 | designed | zero-dep node .mjs validator; 6 check categories; error/warning split
 - 2026-06-01 | in-progress | starting T-01
+- 2026-06-01 | all dev done (status=testing) | T-01..T-03 done; validator working
+- 2026-06-01 | all tests pass (status=ready-to-ship) | TT-01..TT-03 pass; validator found+fixed a real archive bug
 
 ## State Machine
 
@@ -21,4 +23,4 @@ draft → approved → designed → in-progress → testing → ready-to-ship �
 
 ## Continue From
 
-写 scripts/validate-specs.mjs (T-01)。
+bump v0.1.5 (no installer)，merge to main，tag，CHANGELOG，归档。
