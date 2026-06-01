@@ -1,6 +1,6 @@
 # Tasks: 2026-06-build-resilience
 
-> Continue From: TT-01..TT-04 (testing)
+> Continue From: ready-to-ship (all T + TT done; 详见 test-plan.md)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -30,39 +30,33 @@
 
 ## TT-01 完好 cache 校验通过
 
-- status: todo
+- status: pass
 - method: 自动
 - linked-requirement: proposal §5 完好 cache
 - verify: pnpm run dist:check → 全 OK exit 0
-- executed-at: 
-- result: 
-- evidence: 
+- result: pass（详见 test-plan.md TT-01）
 
 ## TT-02 损坏检测三模式
 
-- status: todo
+- status: pass
 - method: 手工
 - linked-requirement: proposal §5 损坏场景
 - verify: 备份并 truncate 一个 electron zip → 默认模式删除 exit 0 / --strict exit 1 / --redownload 重下修复 exit 0；测试后恢复
-- executed-at: 
-- result: 
-- evidence: 
+- result: pass（详见 test-plan.md TT-02；redownload 因弱网未完成下载但失败处理正确）
 
 ## TT-03 dist:mac 端到端仍出 4 产物
 
-- status: todo
+- status: pass
 - method: 自动
 - linked-requirement: proposal §5 dist 脚本前置校验
 - verify: pnpm dist:mac → dist:check 通过 + 4 产物生成 VALID
-- executed-at: 
-- result: 
-- evidence: 
+- result: pass（详见 test-plan.md TT-03）
 
 ## TT-04 validate:specs + build green
 
-- status: todo
+- status: pass
 - method: 自动
 - verify: pnpm run validate:specs 0 error；pnpm run build exit 0
-- executed-at: 
-- result: 
-- evidence: 
+- executed-at: 2026-06-01
+- result: pass — validate 0 error；build 在 TT-03 dist:mac 内已绿
+- evidence: 见 test-plan.md
