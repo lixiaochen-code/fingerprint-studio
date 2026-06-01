@@ -1,6 +1,6 @@
 # Tasks: 2026-06-migrate-legacy-docs
 
-> Continue From: T-06 not started (T-01..T-05 done; Phase 2 complete)
+> Continue From: T-07 not started (T-01..T-06 done; Phase 3 complete)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -45,11 +45,11 @@
 
 ## Phase 3: handoff 迁移
 
-- [ ] **T-06** 迁移 docs/specs/handoff-*.md + scripting-handoff.md + test-checklist → docs/handoffs/
-  - status: todo
-  - commit: 
+- [x] **T-06** 迁移 docs/specs/handoff-*.md + scripting-handoff.md + test-checklist → docs/handoffs/
+  - status: done
+  - commit: (this commit)
   - files: 10 个 git mv（其中 8 个 handoff- 前缀去掉、scripting-handoff.md 改名 scripting.md、test-checklist 保持原名）
-  - verify: docs/handoffs/ 含 10 个文件；docs/specs/ 仅可能残留空目录
+  - verify: docs/handoffs/ 含 10 个文件；docs/specs/ 已空
 
 ## Phase 4: 旧目录与 AGENT.md 清理
 
