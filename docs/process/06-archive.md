@@ -26,21 +26,34 @@
    - 失败过的 change（release-notes §6 Failed Attempts 不为空）必须在 §2 分析根因
 2. **用户认可 retrospective**
    - 用户简单 "ok" 即可，不需要长论证
-3. **整体迁移**
+3. **整体迁移（用自动化脚本，推荐）**
 
    ```bash
+   pnpm run archive <slug>
+   ```
+
+   该命令（`scripts/archive-change.mjs`，由 change `2026-06-archive-helper` 引入）自动：
+   - 校验 STATUS.status == `shipped`（否则报错退出）
+   - 把 `- status:` 字段改为 `archived`（**杜绝手动漏改 status 字段的笔误**）
+   - 追加 Log 行 `YYYY-MM-DD | archived | moved to <path>. **READ-ONLY hereafter.**`
+   - 按 STATUS.module 解析归档目标（`_cross` / `desktop/<module>`）
+   - `git mv specs/changes/<slug> specs/archive/<target>/<slug>`（含父目录 .gitkeep 清理）
+   - 跑 `validate-specs.mjs` 自检
+
+   **应急手动流程**（脚本不可用时）：
+
+   ```bash
+   # 手动改 STATUS.status = archived（务必改 - status: 字段本身，不只是 Log）
    git mv specs/changes/<slug>/ specs/archive/<module>/<slug>/
    ```
 
    - `<module>` 与 STATUS.module 字段一致
    - 跨模块改动归 `_cross/`
-4. **改 STATUS.status = `archived`**
-   - 在 STATUS.Log 追加最后一条：`YYYY-MM-DD | archived | moved to specs/archive/<module>/<slug>/`
-5. **提交**
+4. **提交**
    - `archive(<slug>): move to archive/<module>`
-6. **Push 到 change 分支或直接 main？**
+   - commit 后再跑一次 `pnpm run validate:specs` 确认 0 error
+5. **Push 到 main**
    - 归档动作在 main 上做（已 merge 完）
-   - 创建短分支 `archive/<slug>` → PR → merge 到 main，使用 squash 或 merge commit 均可（这是行政性 commit，可简化）
 
 ## 5. 操作流程（人类视角）
 
@@ -71,6 +84,15 @@
 3. **`archive/` 目录里出现 `in-progress` 状态**：违规，归档前必须改成 `archived`。
 4. **归档前没合 delta 进 baseline**：05-release Step 3 漏做的话，archive 之后 baseline 与代码现状不一致。归档前 agent 必须验证 baseline 已更新。
 5. **跨模块 change 归到某一具体模块**：必须归 `_cross/`，不要"凑就近"。
+
+## 8.1 元数据笔误的修正（例外条款）
+
+"archive 只读"约束**内容**（proposal / design / 决策），但**归档元数据的笔误**（`- status:` 字段值、拼写、路径错字）允许由后续 change 修正，前提是：
+
+- 只改元数据，不改决策内容
+- commit message 注明修正原因（例：`fix(<slug>): correct STATUS.status to archived (caught by validate:specs)`）
+
+背景：`process-validators` 与 `build-resilience` 归档时都出现过 `- status:` 字段停在 `ready-to-ship` 的笔误。这正是 `pnpm run archive` 自动化要根除的；历史遗留的此类笔误按本条修正。
 
 ## 9. 与其他环节的接口
 
