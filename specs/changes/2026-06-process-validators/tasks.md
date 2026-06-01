@@ -1,6 +1,6 @@
 # Tasks: 2026-06-process-validators
 
-> Continue From: T-02 not started (T-01 done)
+> Continue From: TT-01..TT-03 (testing)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -16,15 +16,15 @@
 
 ## T-02 挂 package.json validate:specs script
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: package.json
-- verify: `pnpm run validate:specs` 可调用
+- verify: `pnpm run validate:specs` 可调用，输出 All checks passed
 
 ## T-03 流程文档加引用
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: docs/process/00-overview.md (FAQ), docs/process/03-development.md (退出动作)
 - verify: 两处都提到 validate:specs
 

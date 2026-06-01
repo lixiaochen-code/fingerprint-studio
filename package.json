@@ -11,6 +11,7 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p tsconfig.electron.json && wait-on tcp:127.0.0.1:5173 && electron .\"",
     "build": "tsc -p tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=8192 vite build && tsc -p tsconfig.electron.json",
     "preview": "vite preview --host 127.0.0.1",
+    "validate:specs": "node scripts/validate-specs.mjs",
     "dist": "pnpm run build && electron-builder",
     "dist:mac": "pnpm run build && electron-builder --mac",
     "dist:win": "pnpm run build && electron-builder --win",

@@ -127,6 +127,7 @@ docs(2026-05-bootstrap-process): create 03-development.md  [task: T-05]
 - STATUS.status: `in-progress` → `testing`
 - STATUS.Log 追加：`YYYY-MM-DD | all tasks done (status=testing) | <task-count> tasks, <commit-count> commits`
 - git commit message: `docs(<slug>): all tasks done, entering testing`
+- 跑一次 `pnpm run validate:specs`，确认 0 error（校验 STATUS / 状态一致性 / Continue From / commit 格式）
 - 不打 tag
 
 ## 8. 反例与禁忌

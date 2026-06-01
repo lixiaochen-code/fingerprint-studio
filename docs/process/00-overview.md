@@ -134,6 +134,9 @@ A: 不一定。本项目方案 C：手工 + 单测并行，单测可选。但每
 **Q: STATUS.md 和 git branch / tag 哪个是真源？**
 A: 文档里的字段是 agent 视角的真源；git tag 是发版动作的真源。两者必须一致。不一致时以 git tag 为准（因为 tag 不可改且推到了远程）。
 
+**Q: 如何机器校验流程合规？**
+A: 跑 `pnpm run validate:specs`。它检查 specs/changes/ 与 specs/archive/ 的 STATUS 完整性、状态一致性（archived 必须在 archive/、changes/ 不应有 archived stray）、tasks.md 的 Continue From、以及最近 commit 格式。error → exit 1，warning → exit 0。由 change `2026-06-process-validators` 引入。
+
 ## 9. 流程演进
 
 本流程是活文档。任何 agent 或用户发现以下情况都应触发流程修订：
