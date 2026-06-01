@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.5 — 2026-06-01
+
+### Process / Tooling
+
+- 新增 `pnpm run validate:specs`：零依赖流程合规校验器（STATUS 完整性 / 状态一致性 / Continue From / commit 格式）
+- 校验器首次运行即发现并修正一个归档元数据 bug
+- 流程文档加入校验器引用
+- 应用二进制无变化（不重新分发安装包；v0.1.4 仍代表当前应用）
+
+详见 [process-validators release notes](specs/archive/_cross/2026-06-process-validators/release-notes.md)（即将归档）。
+
 ## v0.1.4 — 2026-06-01
 
 ### Fixed

@@ -16,6 +16,8 @@
 - 2026-06-01 | in-progress | starting T-01
 - 2026-06-01 | all dev done (status=testing) | T-01..T-03 done; validator working
 - 2026-06-01 | all tests pass (status=ready-to-ship) | TT-01..TT-03 pass; validator found+fixed a real archive bug
+- 2026-06-01 | shipped v0.1.5 (status=shipped) | merge to main; tag v0.1.5; no installer rebuild (app binary unchanged); CHANGELOG updated
+- 2026-06-01 | archived | retrospective written; moved to specs/archive/_cross/. **READ-ONLY hereafter.**
 
 ## State Machine
 
@@ -23,4 +25,4 @@ draft → approved → designed → in-progress → testing → ready-to-ship �
 
 ## Continue From
 
-bump v0.1.5 (no installer)，merge to main，tag，CHANGELOG，归档。
+终态。已归档，**只读**。
