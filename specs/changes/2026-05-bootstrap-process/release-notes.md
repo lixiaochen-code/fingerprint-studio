@@ -59,3 +59,11 @@ rm -f release/Auto\ Registry-0.1.1*
 > 上线过程中任何失败必须在此追加。每次失败一段。归档前不允许删除此段。
 
 无失败记录。本 change 完整执行：21 → 13 task 完成（迁移 8 task 移出 scope）；10 个 spec-level TT 全部 pass；build 全绿。
+
+### Build Warning 1 (2026-06-01 10:23, 非阻塞)
+
+- 现象: `pnpm dist:mac` 在 x64 packaging 阶段报 `⨯ cannot close error=flate: corrupt input before offset 63225541`
+- 根因: 暂未深查；electron-builder 在 packaging 临时文件压缩时遇到的内部异常
+- 处置: 无人工干预；命令 exit 0；4 个产物（arm64+x64 各一对 dmg/zip）全部生成；`hdiutil verify` 两个 DMG 都 VALID
+- 关联 commit: 无（构建产物，未入 git）
+- 备注: 不影响发版，但下次 dist 注意是否复现；如复现需排查 electron-builder 与 native module rebuild 兼容性
