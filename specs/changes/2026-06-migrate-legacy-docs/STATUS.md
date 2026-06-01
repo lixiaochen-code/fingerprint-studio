@@ -3,17 +3,19 @@
 - slug: 2026-06-migrate-legacy-docs
 - module: _cross
 - type: process
-- status: in-progress
+- status: ready-to-ship
 - branch: change/_cross/2026-06-migrate-legacy-docs
 - created-at: 2026-06-01
 - last-updated: 2026-06-01
 
 ## Log
 
-- 2026-06-01 | created (status=draft) | spin-off from 2026-05-bootstrap-process retrospective §6; migrate legacy docs from docs/specs/ and .kiro/specs/ into specs/baseline/ + specs/archive/
-- 2026-06-01 | approved | proposal scope clear, no Open Questions (intent inherited from bootstrap-process scope reduction); user said "继续都做完" → batch authorization
-- 2026-06-01 | designed | 4-phase plan, baseline 抽 Current Capabilities + Legacy 附录, archive git mv + STATUS, handoff 去前缀
-- 2026-06-01 | in-progress | starting T-01
+- 2026-06-01 | created (status=draft) | spin-off from 2026-05-bootstrap-process retrospective §6
+- 2026-06-01 | approved | inherited from bootstrap; user batch authorization
+- 2026-06-01 | designed | 4-phase plan
+- 2026-06-01 | in-progress | T-01 start
+- 2026-06-01 | all dev done (status=testing) | T-01..T-08 done; entering testing
+- 2026-06-01 | all tests pass (status=ready-to-ship) | TT-01, TT-02 全 pass
 
 ## State Machine
 
@@ -21,4 +23,4 @@ draft → approved → designed → in-progress → testing → ready-to-ship �
 
 ## Continue From
 
-写 tasks.md 然后开始执行。
+起草 release-notes，bump version 0.1.1 → 0.1.2，本地 merge to main（用户授权简化为本地 merge），打 tag v0.1.2，构建 mac，归档。

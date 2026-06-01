@@ -1,6 +1,6 @@
 # Tasks: 2026-06-migrate-legacy-docs
 
-> Continue From: TT-01 + TT-02 (Phase 1-4 全部完成；进入测试)
+> Continue From: ready to release. 起草 release-notes、bump version、merge to main、tag、build、归档
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -67,19 +67,19 @@
 
 ## Phase 5: 测试与发版
 
-- [ ] **TT-01** spec-level 端到端验证
-  - status: todo
+- [x] **TT-01** spec-level 端到端验证
+  - status: pass
   - method: 手工
   - linked-requirement: proposal §5 全部 Requirement
-  - verify: ls 检查 baseline / archive / handoffs 全部就位；ls 验证旧位置不存在；模拟 agent 流程读 AGENTS.md → docs/process/ → specs/baseline/desktop/{stealth,scripts}/ 通顺
-  - executed-at: 
-  - result: 
-  - evidence: 
+  - verify: 见 test-plan.md TT-01
+  - executed-at: 2026-06-01 10:50
+  - result: pass
+  - evidence: ls/grep 输出
 
-- [ ] **TT-02** pnpm run build 通过
-  - status: todo
+- [x] **TT-02** pnpm run build 通过
+  - status: pass
   - method: 自动
   - verify: exit 0
-  - executed-at: 
-  - result: 
-  - evidence: 
+  - executed-at: 2026-06-01 10:51
+  - result: pass — built in 22.67s
+  - evidence: pnpm 输出
