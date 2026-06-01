@@ -3,8 +3,8 @@
 - slug: 2026-06-migrate-legacy-docs
 - module: _cross
 - type: process
-- status: ready-to-ship
-- branch: change/_cross/2026-06-migrate-legacy-docs
+- status: archived
+- branch: change/_cross/2026-06-migrate-legacy-docs (merged via local merge commit)
 - created-at: 2026-06-01
 - last-updated: 2026-06-01
 
@@ -16,6 +16,8 @@
 - 2026-06-01 | in-progress | T-01 start
 - 2026-06-01 | all dev done (status=testing) | T-01..T-08 done; entering testing
 - 2026-06-01 | all tests pass (status=ready-to-ship) | TT-01, TT-02 全 pass
+- 2026-06-01 | shipped v0.1.2 (status=shipped) | local merge to main; tag v0.1.2 pushed; arm64 mac installer built (VALID); x64 build failed (Failed Attempt 1, hotfix pending); CHANGELOG updated
+- 2026-06-01 | archived | retrospective written; moved to specs/archive/_cross/. **READ-ONLY hereafter.**
 
 ## State Machine
 
@@ -23,4 +25,4 @@ draft → approved → designed → in-progress → testing → ready-to-ship �
 
 ## Continue From
 
-起草 release-notes，bump version 0.1.1 → 0.1.2，本地 merge to main（用户授权简化为本地 merge），打 tag v0.1.2，构建 mac，归档。
+终态。本 change 已归档，**只读**。x64 build failure 通过新 hotfix change 跟进。
