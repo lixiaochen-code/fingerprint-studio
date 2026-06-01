@@ -3,7 +3,7 @@
 - slug: 2026-06-process-validators
 - module: _cross
 - type: process
-- status: ready-to-ship
+- status: archived
 - branch: change/_cross/2026-06-process-validators
 - created-at: 2026-06-01
 - last-updated: 2026-06-01
