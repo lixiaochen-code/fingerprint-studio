@@ -1,6 +1,6 @@
 # Tasks: 2026-06-migrate-legacy-docs
 
-> Continue From: T-04 not started (T-01..T-03 done)
+> Continue From: T-05 not started (T-01..T-04 done)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -31,9 +31,9 @@
   - files: git mv 整目录 → specs/archive/desktop/scripts/2026-05-global-scripts-and-queues/；新增 STATUS.md (legacy=true)；删除 archive/desktop/scripts/.gitkeep
   - verify: 目录到位；STATUS.md 标 legacy
 
-- [ ] **T-04** 迁移 .kiro/specs/global-scripts-phase-6-runtime → archive
-  - status: todo
-  - commit: 
+- [x] **T-04** 迁移 .kiro/specs/global-scripts-phase-6-runtime → archive
+  - status: done
+  - commit: (this commit)
   - files: git mv → specs/archive/desktop/scripts/2026-05-phase-6-runtime/；删 .config.kiro；新增 STATUS.md
   - verify: 目录到位；不含 .config.kiro
 
