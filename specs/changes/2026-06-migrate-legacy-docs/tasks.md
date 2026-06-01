@@ -1,6 +1,6 @@
 # Tasks: 2026-06-migrate-legacy-docs
 
-> Continue From: T-02 not started (T-01 done)
+> Continue From: T-03 not started (T-01, T-02 done)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -17,11 +17,11 @@
   - files: specs/baseline/desktop/stealth/spec.md (new); 删除 docs/specs/anti-detection.md
   - verify: 含 Current Capabilities 段≥5 条 Requirement；Legacy Design Document 附录全文内联
 
-- [ ] **T-02** 创建 specs/baseline/desktop/scripts/spec.md（合并 scripting.md + global-scripts-and-queues.md）
-  - status: todo
-  - commit: 
+- [x] **T-02** 创建 specs/baseline/desktop/scripts/spec.md（合并 scripting.md + global-scripts-and-queues.md）
+  - status: done
+  - commit: (this commit)
   - files: specs/baseline/desktop/scripts/spec.md (new); 删除 docs/specs/scripting.md + global-scripts-and-queues.md
-  - verify: 含 Current Capabilities 段≥7 条 Requirement；Legacy 附录采用摘要+引用 git 历史/archive 形式（避免文件超 1500 行）
+  - verify: 含 Current Capabilities 段≥7 条 Requirement（实际 10 条）；Legacy 附录采用摘要+引用 git 历史/archive 形式（避免文件超 1500 行）
 
 ## Phase 2: archive 历史迁移
 
