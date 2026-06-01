@@ -1,6 +1,6 @@
 # Tasks: 2026-06-migrate-legacy-docs
 
-> Continue From: T-01 not started
+> Continue From: T-02 not started (T-01 done)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -11,9 +11,9 @@
 
 ## Phase 1: baseline 内容迁移
 
-- [ ] **T-01** 创建 specs/baseline/desktop/stealth/spec.md（迁 anti-detection.md）
-  - status: todo
-  - commit: 
+- [x] **T-01** 创建 specs/baseline/desktop/stealth/spec.md（迁 anti-detection.md）
+  - status: done
+  - commit: (this commit)
   - files: specs/baseline/desktop/stealth/spec.md (new); 删除 docs/specs/anti-detection.md
   - verify: 含 Current Capabilities 段≥5 条 Requirement；Legacy Design Document 附录全文内联
 
