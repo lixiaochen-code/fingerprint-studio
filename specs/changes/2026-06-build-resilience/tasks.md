@@ -1,6 +1,6 @@
 # Tasks: 2026-06-build-resilience
 
-> Continue From: T-03 not started (T-01, T-02 done)
+> Continue From: TT-01..TT-04 (testing)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -23,10 +23,10 @@
 
 ## T-03 文档沉淀
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: docs/PROJECT_GUIDE.md
-- verify: 记录 electron cache 校验机制 + 弱网 fallback
+- verify: 常用命令含 dist:check / validate:specs；新增"弱网下的 build"小节含 --redownload/--strict 用法
 
 ## TT-01 完好 cache 校验通过
 
