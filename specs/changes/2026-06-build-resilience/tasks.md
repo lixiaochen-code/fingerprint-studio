@@ -1,6 +1,6 @@
 # Tasks: 2026-06-build-resilience
 
-> Continue From: T-02 not started (T-01 done)
+> Continue From: T-03 not started (T-01, T-02 done)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -16,10 +16,10 @@
 
 ## T-02 挂 dist:check + 前置到 dist:*
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: package.json
-- verify: dist:check script 存在；dist:mac/win/linux/all 前置 dist:check
+- verify: dist:check script 存在；dist/dist:mac/win/linux/all 全部前置 `dist:check &&`；pnpm run dist:check 输出全 OK
 
 ## T-03 文档沉淀
 
