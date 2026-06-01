@@ -35,10 +35,16 @@ rm -f release/Auto\ Registry-0.1.2*
 
 ## 5. Known Issues
 
-无。所有 Requirement 验证 pass，build 全绿。
+- **x64 mac build 失败**：`pnpm dist:mac` 在 packaging x64 阶段报 `app-builder_arm64 process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE` (exit 1)。arm64 产物（dmg + zip）正常生成且 hdiutil VALID。本次发版仅含 arm64。x64 修复留待后续 hotfix change（涉及 app-builder cross-arch 配置）。
 
 ## 6. Failed Attempts (失败留痕)
 
 > 上线过程中任何失败必须在此追加。每次失败一段。归档前不允许删除此段。
 
-无失败。开发过程中遇到一个 git mv 嵌套目录问题（T-05 把 `global-scripts-profile-launch-close/` 整目录 mv 到目标后产生了双层路径），用 fixup commit 扁平化解决，未影响发版。
+### Failed Attempt 1 (2026-06-01 10:55, x64 build cross-arch failure)
+
+- 现象: `pnpm dist:mac` x64 packaging 阶段报 `app-builder_arm64 process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE` exit 1
+- 根因: 待查；初判是 electron-builder 在 Apple Silicon 主机上对 x64 target 执行 cross-arch packaging 时的工具链兼容性问题
+- 处置: 重试一次仍失败；arm64 产物完整可用（dmg + zip + blockmap，hdiutil VALID）；本次发版接受仅 arm64 产物；x64 后续 hotfix change 处理
+- 关联 commit: 无（构建产物，不入 git）
+- 备注: bootstrap-process v0.1.1 发版时 x64 也出现过类似 warning（flate corrupt）但仍 exit 0；本次升级为 exit 1 说明问题加重，需要专项排查
