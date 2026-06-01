@@ -1,6 +1,6 @@
 # Tasks: 2026-06-build-resilience
 
-> Continue From: T-01 not started
+> Continue From: T-02 not started (T-01 done)
 > Last updated: 2026-06-01 by initial-author
 
 ## Conventions
@@ -9,10 +9,10 @@
 
 ## T-01 编写 scripts/verify-electron-cache.mjs
 
-- status: todo
-- commit: 
+- status: done
+- commit: (this commit)
 - files: scripts/verify-electron-cache.mjs
-- verify: 零依赖；cache 路径跨平台解析；SHASUMS 解析；SHA256 流式校验；默认/--strict/--redownload 三模式；无 cache 优雅 skip
+- verify: 零依赖；跨平台 cache 路径；SHASUMS 解析；SHA256 流式校验；delete/strict/redownload 三模式；无 cache 优雅 skip。首跑当前仓库 4 个 electron zip 全部校验通过
 
 ## T-02 挂 dist:check + 前置到 dist:*
 
