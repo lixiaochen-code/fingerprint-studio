@@ -29,6 +29,7 @@ import { testProxy as testProxyV2 } from './proxies/test'
 import type { ProxyAuthCredentials } from './proxyAuth'
 import { ProxyStore } from './proxies/store'
 import { parseProxyBatch } from './proxies/parser'
+import { SocksTunnelManager, type SocksProxyConfig } from './proxies/socksTunnel'
 import { ProfileIdTakenError, InvalidProfileIdError } from './store'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
 
@@ -36,6 +37,7 @@ const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | undefined
 let store: ProfileStore
 let proxyStore: ProxyStore
+const socksTunnelManager = new SocksTunnelManager()
 let scriptStore: ScriptStore
 let scriptRuntime: ScriptRuntimeManager
 let scriptBridge: ScriptBridge
@@ -78,8 +80,22 @@ function resolveProxy(profile: BrowserProfile): Proxy | undefined {
   return proxyStore.get(profile.proxyId)
 }
 
-function proxyUrlForLaunch(proxy: Proxy | undefined): string | undefined {
-  if (!proxy) return undefined
+async function proxyUrlForLaunch(profileId: string, proxy: Proxy | undefined): Promise<string | undefined> {
+  if (!proxy) {
+    await socksTunnelManager.close(profileId)
+    return undefined
+  }
+  if ((proxy.scheme === 'socks5' || proxy.scheme === 'socks4') && (proxy.username || proxy.password)) {
+    const upstream: SocksProxyConfig = {
+      scheme: proxy.scheme,
+      host: proxy.host,
+      port: proxy.port,
+      username: proxy.username,
+      password: proxy.password
+    }
+    return socksTunnelManager.ensure(profileId, upstream)
+  }
+  await socksTunnelManager.close(profileId)
   // Chromium --proxy-server 接受 http / https / socks4 / socks5 四种 scheme,
   // 与 ProxyStore 的 ProxyScheme 完全一致,直接拼即可。
   return `${proxy.scheme}://${proxy.host}:${proxy.port}`
@@ -87,6 +103,7 @@ function proxyUrlForLaunch(proxy: Proxy | undefined): string | undefined {
 
 function proxyAuthFor(proxy: Proxy | undefined): ProxyAuthCredentials | undefined {
   if (!proxy || !proxy.username || !proxy.password) return undefined
+  if (proxy.scheme === 'socks5' || proxy.scheme === 'socks4') return undefined
   return {
     host: proxy.host,
     port: proxy.port,
@@ -298,11 +315,12 @@ async function launchProfile(profile: BrowserProfile, options: { openStartUrl?: 
     : undefined
 
   const proxy = resolveProxy(profile)
+  const proxyUrl = await proxyUrlForLaunch(profile.id, proxy)
   const args = buildLaunchArgs(
     profile,
     selection,
     activePlugins.map((plugin) => plugin.path),
-    proxyUrlForLaunch(proxy),
+    proxyUrl,
     { initialUrl, proxyAuth: proxyAuthFor(proxy) }
   )
 
@@ -329,6 +347,7 @@ async function launchProfile(profile: BrowserProfile, options: { openStartUrl?: 
   const startedAt = Date.now()
   child.on('exit', (code, signal) => {
     profileProcesses.delete(profile.id)
+    void socksTunnelManager.close(profile.id)
     const uptimeMs = Date.now() - startedAt
     // SIGTERM from our own stopProfile or normal close — no need to shout
     const userStopped = signal === 'SIGTERM' || signal === 'SIGKILL'
@@ -344,6 +363,7 @@ async function launchProfile(profile: BrowserProfile, options: { openStartUrl?: 
   })
   child.on('error', (error) => {
     profileProcesses.delete(profile.id)
+    void socksTunnelManager.close(profile.id)
     emitCrash({
       profileId: profile.id,
       exitCode: null,
@@ -359,6 +379,7 @@ function stopProfile(profileId: string) {
   if (!child) return
   child.kill()
   profileProcesses.delete(profileId)
+  void socksTunnelManager.close(profileId)
 }
 
 /**
@@ -682,16 +703,21 @@ const PROFILE_KILL_GRACE_MS = 200
  */
 async function terminateProfileBrowser(profileId: string): Promise<void> {
   const child = profileProcesses.get(profileId)
-  if (!child) return
+  if (!child) {
+    await socksTunnelManager.close(profileId)
+    return
+  }
   // killed = 我们曾经成功 .kill() 过它(不论它是否真的退出);这种情况下再发一次
   // SIGTERM 没意义,直接当 no-op 处理。
   if (child.killed) {
     profileProcesses.delete(profileId)
+    await socksTunnelManager.close(profileId)
     return
   }
   // 进程已退,只是 spawn 的 'exit' listener 还没把表清掉(异步窗口期);等同 no-op。
   if (child.exitCode !== null || child.signalCode !== null) {
     profileProcesses.delete(profileId)
+    await socksTunnelManager.close(profileId)
     return
   }
 
@@ -702,6 +728,7 @@ async function terminateProfileBrowser(profileId: string): Promise<void> {
       settled = true
       // 幂等 delete:spawn 的 'exit' listener 也会 delete 一次,后到的 no-op
       profileProcesses.delete(profileId)
+      void socksTunnelManager.close(profileId)
       resolve()
     }
     child.once('exit', done)
@@ -810,7 +837,8 @@ app.on('before-quit', (event) => {
       scriptBridge?.shutdown()
       await Promise.all([
         scriptRuntime?.shutdown() ?? Promise.resolve(),
-        terminateAllProfileBrowsers()
+        terminateAllProfileBrowsers(),
+        socksTunnelManager.closeAll()
       ])
     } catch (error) {
       console.error('[main] cleanup before quit failed:', error)
