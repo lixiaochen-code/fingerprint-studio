@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.8 — 2026-06-03
+
+### Fixed
+
+- 修复带用户名密码的 SOCKS4/SOCKS5 代理在 Chromium 中无法认证导致页面 `ERR_SOCKS_CONNECTION_FAILED` 的问题：应用会为这类代理创建本机无认证 SOCKS5 隧道，由主进程完成上游认证
+- 代理列表测试现在会真实执行 SOCKS 握手，不再把“端口能连上”误判为 SOCKS 代理可用
+- 当上游返回 HTTP 403 或其它非 SOCKS greeting 时，测试结果会明确提示协议/凭据/白名单/会话问题
+
+详见 [socks5-auth-proxy release notes](specs/archive/desktop/proxies/2026-06-socks5-auth-proxy/release-notes.md)。
+
 ## v0.1.7 — 2026-06-01
 
 ### Process / Tooling

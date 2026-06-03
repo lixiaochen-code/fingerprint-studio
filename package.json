@@ -1,6 +1,6 @@
 {
   "name": "auto-registry",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Local profile manager for isolated ecommerce browser environments.",
   "main": "dist-electron/main.js",
