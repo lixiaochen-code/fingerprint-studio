@@ -15,7 +15,7 @@
 ## 4. Rollback Plan
 
 ```bash
-git revert <fix-commit>
+git revert 4405371 06cd3f4 0e04b6b
 ```
 
 ## 5. Known Issues
