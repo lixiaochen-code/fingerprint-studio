@@ -4,18 +4,17 @@
  * 这是从老 [electron/proxyTest.ts](../proxyTest.ts) 迁移来的,核心 CONNECT 探活流程不变;
  * 增量:
  *   1. 接口对齐 Proxy 类型(scheme 字段也得带,虽然 CONNECT 只对 http/https 代理直接有效;
- *      socks5/socks4 代理需要走 SOCKS 握手,这里 fallback 成"socks 代理就只做 TCP 连通性测试")
+ *      socks5/socks4 代理走真实 SOCKS 握手,避免认证失败被误判为可用)
  *   2. 测通后用同一代理通道访问 https://ipinfo.io/json 拿地理信息
  *
  * 设计选择:
- * - socks 代理的握手实现复杂,这一版本只做"TCP 连接到 host:port + 等 5s 内有响应"。
- *   后续要严格判断 socks5 鉴权失败需要再加 SOCKS 握手代码。
- * - geo 探测用 https-proxy-agent 还是裸 socket?裸 socket + 自实现 TLS 太重,这里直接
- *   用 https-proxy-agent + fetch。需要 npm add `https-proxy-agent` + `socks-proxy-agent`。
- *   **暂时**:先实现 HTTP/HTTPS 代理 geo 探测;socks 代理 geo 留空,Phase 后续再补 socks-proxy-agent。
+ * - 不引入 socks-proxy-agent。SOCKS 握手由 socksTunnel.ts 手写,HTTP/HTTPS 仍走原有裸
+ *   socket + CONNECT 流程。
  */
 import net from 'node:net'
+import tls from 'node:tls'
 import type { Proxy, ProxyTestSnapshot, ProxyScheme } from './schema'
+import { openSocksConnection, type SocksProxyConfig } from './socksTunnel'
 
 const DEFAULT_TARGET_HOST = 'www.gstatic.com'
 const DEFAULT_TARGET_PORT = 443
@@ -23,6 +22,9 @@ const CONNECT_TIMEOUT_MS = 5000
 const GEO_TIMEOUT_MS = 7000
 
 function probeViaConnect(scheme: ProxyScheme, host: string, port: number, username?: string, password?: string): Promise<{ ok: true; latencyMs: number } | { ok: false; code: ProxyTestSnapshot['code']; message: string }> {
+  if (scheme === 'socks5' || scheme === 'socks4') {
+    return probeViaSocks(scheme, host, port, username, password)
+  }
   return new Promise((resolve) => {
     let settled = false
     const startedAt = Date.now()
@@ -43,12 +45,6 @@ function probeViaConnect(scheme: ProxyScheme, host: string, port: number, userna
     })
 
     socket.once('connect', () => {
-      // SOCKS 代理就只做 TCP 连通性测试 —— 真正的 SOCKS 握手实现起来不小,先用 TCP 通了
-      // 作为最低门槛。完整 SOCKS 探活后续再加,标记 TODO。
-      if (scheme === 'socks5' || scheme === 'socks4') {
-        finish({ ok: true, latencyMs: Date.now() - startedAt })
-        return
-      }
       const lines: string[] = [
         `CONNECT ${DEFAULT_TARGET_HOST}:${DEFAULT_TARGET_PORT} HTTP/1.1`,
         `Host: ${DEFAULT_TARGET_HOST}:${DEFAULT_TARGET_PORT}`,
@@ -91,6 +87,31 @@ function probeViaConnect(scheme: ProxyScheme, host: string, port: number, userna
   })
 }
 
+async function probeViaSocks(scheme: Extract<ProxyScheme, 'socks5' | 'socks4'>, host: string, port: number, username?: string, password?: string): Promise<{ ok: true; latencyMs: number } | { ok: false; code: ProxyTestSnapshot['code']; message: string }> {
+  const startedAt = Date.now()
+  try {
+    const socket = await openSocksConnection({ scheme, host, port, username, password }, {
+      host: DEFAULT_TARGET_HOST,
+      port: DEFAULT_TARGET_PORT
+    })
+    socket.destroy()
+    return { ok: true, latencyMs: Date.now() - startedAt }
+  } catch (error) {
+    return normalizeSocksError(error)
+  }
+}
+
+function normalizeSocksError(error: unknown): { ok: false; code: ProxyTestSnapshot['code']; message: string } {
+  const message = error instanceof Error ? error.message : String(error)
+  const code = /auth/i.test(message) ? 'AUTH'
+    : /within \d+ms|timeout/i.test(message) ? 'TIMEOUT'
+    : /ECONNREFUSED|connection refused/i.test(message) ? 'REFUSED'
+    : /ENOTFOUND|EAI_AGAIN|getaddrinfo|Invalid IPv6/i.test(message) ? 'BAD_HOST'
+    : /SOCKS[45]/i.test(message) ? 'BAD_RESPONSE'
+    : 'UNKNOWN'
+  return { ok: false, code, message }
+}
+
 /**
  * 通过代理通道访问 ipinfo.io 拿地理信息。
  *
@@ -105,27 +126,38 @@ function probeViaConnect(scheme: ProxyScheme, host: string, port: number, userna
  * 失败/超时返回 undefined(不算致命),latencyMs 仍保留。
  */
 async function probeGeo(scheme: ProxyScheme, host: string, port: number, username?: string, password?: string): Promise<ProxyTestSnapshot['geo'] | undefined> {
-  if (scheme === 'socks5' || scheme === 'socks4') {
-    // socks 走真的得引入 socks-proxy-agent,先 skip
-    return undefined
-  }
-  return new Promise((resolve) => {
+  const connect = scheme === 'socks5' || scheme === 'socks4'
+    ? () => openSocksConnection(
+      { scheme, host, port, username, password } satisfies SocksProxyConfig,
+      { host: 'ipinfo.io', port: 443 }
+    )
+    : () => openHttpConnectTunnel(host, port, username, password, { host: 'ipinfo.io', port: 443 })
+  return probeGeoViaSocket(connect)
+}
+
+function openHttpConnectTunnel(host: string, port: number, username: string | undefined, password: string | undefined, target: { host: string; port: number }): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
     let settled = false
-    const finish = (result: ProxyTestSnapshot['geo'] | undefined) => {
+    const socket = net.connect({ host, port })
+    const finish = (result: { ok: true } | { ok: false; error: Error }) => {
       if (settled) return
       settled = true
-      try { socket.destroy() } catch { /* noop */ }
-      resolve(result)
+      socket.setTimeout(0)
+      socket.off('data', onData)
+      if (result.ok) resolve(socket)
+      else {
+        socket.destroy()
+        reject(result.error)
+      }
     }
-    const socket = net.connect({ host, port })
+    const fail = (error: Error) => finish({ ok: false, error })
     socket.setTimeout(GEO_TIMEOUT_MS)
-    socket.on('timeout', () => finish(undefined))
-    socket.on('error', () => finish(undefined))
-
+    socket.on('timeout', () => fail(new Error(`No response from proxy within ${GEO_TIMEOUT_MS}ms.`)))
+    socket.on('error', fail)
     socket.once('connect', () => {
       const lines: string[] = [
-        'CONNECT ipinfo.io:443 HTTP/1.1',
-        'Host: ipinfo.io:443',
+        `CONNECT ${target.host}:${target.port} HTTP/1.1`,
+        `Host: ${target.host}:${target.port}`,
         'User-Agent: auto-registry/proxy-test',
         'Proxy-Connection: keep-alive'
       ]
@@ -136,76 +168,81 @@ async function probeGeo(scheme: ProxyScheme, host: string, port: number, usernam
       socket.write(lines.join('\r\n') + '\r\n\r\n')
     })
 
-    let phase: 'connect' | 'tls' = 'connect'
-    let connectBuf = ''
-    socket.on('data', (chunk) => {
-      if (phase !== 'connect') return
-      connectBuf += chunk.toString('utf8')
-      const headerEnd = connectBuf.indexOf('\r\n\r\n')
+    let buffer = ''
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString('utf8')
+      const headerEnd = buffer.indexOf('\r\n\r\n')
       if (headerEnd === -1) return
-      const firstLine = connectBuf.slice(0, headerEnd).split('\r\n', 1)[0] ?? ''
+      const firstLine = buffer.slice(0, headerEnd).split('\r\n', 1)[0] ?? ''
       const statusMatch = /^HTTP\/[0-9.]+\s+(\d{3})/.exec(firstLine)
-      if (!statusMatch || statusMatch[1] !== '200') {
-        finish(undefined)
+      if (statusMatch?.[1] === '200') {
+        finish({ ok: true })
         return
       }
-      // CONNECT 通了,升级 TLS。需要把 socket 借给 tls.connect 复用
-      phase = 'tls'
-      // 用动态 import 避免模块顶部加载 tls
-      void import('node:tls').then((tls) => {
-        const tlsSocket = tls.connect({
-          socket,
-          servername: 'ipinfo.io',
-          // 不要 reject — ipinfo 证书有效,我们也不需要严格;但保留 default rejectUnauthorized = true
-        })
-        tlsSocket.setTimeout(GEO_TIMEOUT_MS)
-        let httpBuf = ''
-        const finishTls = (geo: ProxyTestSnapshot['geo'] | undefined) => {
-          if (settled) return
-          settled = true
-          try { tlsSocket.destroy() } catch {}
-          try { socket.destroy() } catch {}
-          resolve(geo)
+      fail(new Error(`Proxy CONNECT failed: ${firstLine || 'empty response'}`))
+    }
+    socket.on('data', onData)
+  })
+}
+
+function probeGeoViaSocket(connect: () => Promise<net.Socket>): Promise<ProxyTestSnapshot['geo'] | undefined> {
+  let socket: net.Socket | undefined
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (geo: ProxyTestSnapshot['geo'] | undefined) => {
+      if (settled) return
+      settled = true
+      try { socket?.destroy() } catch {}
+      resolve(geo)
+    }
+    connect().then((connectedSocket) => {
+      socket = connectedSocket
+      const tlsSocket = tls.connect({
+        socket,
+        servername: 'ipinfo.io'
+      })
+      tlsSocket.setTimeout(GEO_TIMEOUT_MS)
+      let httpBuf = ''
+      const finishTls = (geo: ProxyTestSnapshot['geo'] | undefined) => {
+        try { tlsSocket.destroy() } catch {}
+        finish(geo)
+      }
+      tlsSocket.on('timeout', () => finishTls(undefined))
+      tlsSocket.on('error', () => finishTls(undefined))
+      tlsSocket.once('secureConnect', () => {
+        const req = [
+          'GET /json HTTP/1.1',
+          'Host: ipinfo.io',
+          'User-Agent: auto-registry/proxy-test',
+          'Accept: application/json',
+          'Connection: close',
+          '', ''
+        ].join('\r\n')
+        tlsSocket.write(req)
+      })
+      tlsSocket.on('data', (data) => {
+        httpBuf += data.toString('utf8')
+      })
+      tlsSocket.on('end', () => {
+        const headerEnd = httpBuf.indexOf('\r\n\r\n')
+        if (headerEnd === -1) return finishTls(undefined)
+        const body = httpBuf.slice(headerEnd + 4)
+        const cleaned = body.replace(/^[0-9a-f]+\r\n/i, '').replace(/\r\n0\r\n\r\n$/i, '')
+        try {
+          const parsed = JSON.parse(cleaned)
+          finishTls({
+            ip: String(parsed.ip || ''),
+            country: parsed.country ? String(parsed.country) : undefined,
+            region: parsed.region ? String(parsed.region) : undefined,
+            city: parsed.city ? String(parsed.city) : undefined,
+            org: parsed.org ? String(parsed.org) : undefined,
+            asn: parsed.asn?.asn || parsed.org?.match?.(/^(AS\d+)/i)?.[1] || undefined
+          })
+        } catch {
+          finishTls(undefined)
         }
-        tlsSocket.on('timeout', () => finishTls(undefined))
-        tlsSocket.on('error', () => finishTls(undefined))
-        tlsSocket.once('secureConnect', () => {
-          const req = [
-            'GET /json HTTP/1.1',
-            'Host: ipinfo.io',
-            'User-Agent: auto-registry/proxy-test',
-            'Accept: application/json',
-            'Connection: close',
-            '', ''
-          ].join('\r\n')
-          tlsSocket.write(req)
-        })
-        tlsSocket.on('data', (data) => {
-          httpBuf += data.toString('utf8')
-        })
-        tlsSocket.on('end', () => {
-          const headerEnd2 = httpBuf.indexOf('\r\n\r\n')
-          if (headerEnd2 === -1) return finishTls(undefined)
-          const body = httpBuf.slice(headerEnd2 + 4)
-          // 可能是 chunked encoding;ipinfo.io 通常 Connection: close 后直接 body,这里宽松一点。
-          // 去掉前置 hex chunk size 行(如果有)。
-          const cleaned = body.replace(/^[0-9a-f]+\r\n/i, '').replace(/\r\n0\r\n\r\n$/i, '')
-          try {
-            const parsed = JSON.parse(cleaned)
-            finishTls({
-              ip: String(parsed.ip || ''),
-              country: parsed.country ? String(parsed.country) : undefined,
-              region: parsed.region ? String(parsed.region) : undefined,
-              city: parsed.city ? String(parsed.city) : undefined,
-              org: parsed.org ? String(parsed.org) : undefined,
-              asn: parsed.asn?.asn || parsed.org?.match?.(/^(AS\d+)/i)?.[1] || undefined
-            })
-          } catch {
-            finishTls(undefined)
-          }
-        })
-      }).catch(() => finish(undefined))
-    })
+      })
+    }).catch(() => finish(undefined))
   })
 }
 
