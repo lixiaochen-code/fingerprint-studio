@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-验证登录、RBAC、同步上传/下载、后台管理接口与构建。
+验证登录、RBAC、同步上传/下载、后台管理接口、跨设备远端同步与构建。
 
 ## 2. Strategy
 
@@ -34,7 +34,7 @@
 
 - 2026-06-04 | TT-02 pass | `pnpm run build` completed successfully.
 - 2026-06-04 | TT-01 initial fail | sandbox blocked local HTTP listen with `listen EPERM 127.0.0.1`; reran with approved escalation.
-- 2026-06-04 | TT-01 retest pass | `node scripts/cloud-smoke.mjs` returned `cloud smoke ok`.
+- 2026-06-04 | TT-01 retest pass | `node scripts/cloud-smoke.mjs` returned `cloud smoke ok`，覆盖设备 A 上传、设备 B 从同一后端下载。
 - 2026-06-04 | out-of-band pass | `pnpm run validate:specs` completed successfully.
 
 ## 6. Sign-off

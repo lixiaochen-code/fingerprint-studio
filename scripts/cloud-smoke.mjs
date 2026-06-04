@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { CloudService, createWorkspaceSnapshot } from '../dist-electron/cloud/service.js'
 import { CloudHttpServer } from '../dist-electron/cloud/httpServer.js'
+import { CloudRemoteClient } from '../dist-electron/cloud/client.js'
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -97,6 +98,23 @@ const adapter = {
   }
 }
 
+let deviceBWorkspace
+const deviceBAdapter = {
+  readLocalWorkspace(ownerUserId) {
+    return createWorkspaceSnapshot({
+      ownerUserId,
+      profiles: [],
+      proxies: [],
+      scripts: [],
+      scriptSources: [],
+      plugins: []
+    })
+  },
+  applyRemoteWorkspace(snapshot) {
+    deviceBWorkspace = snapshot
+  }
+}
+
 const service = new CloudService({ rootDir, adapter })
 const server = new CloudHttpServer(service)
 const port = await server.listen(0)
@@ -156,6 +174,28 @@ try {
 
   const workerSync = await request(baseUrl, 'POST', '/sync', { direction: 'upload' }, workerToken)
   assert(workerSync.payload.ok === true, 'worker can use assigned sync API')
+
+  const deviceA = new CloudRemoteClient(baseUrl, adapter)
+  const deviceALogin = await deviceA.login({
+    username: 'admin',
+    password: 'admin123456',
+    deviceId: 'device-a'
+  })
+  assert(deviceALogin.ok === true, 'device A login should pass')
+  const deviceAUpload = await deviceA.syncNow(deviceALogin.session.token, 'upload')
+  assert(deviceAUpload.ok === true, 'device A upload should pass')
+
+  const deviceB = new CloudRemoteClient(baseUrl, deviceBAdapter)
+  const deviceBLogin = await deviceB.login({
+    username: 'admin',
+    password: 'admin123456',
+    deviceId: 'device-b'
+  })
+  assert(deviceBLogin.ok === true, 'device B login should pass')
+  const deviceBDownload = await deviceB.syncNow(deviceBLogin.session.token, 'download')
+  assert(deviceBDownload.ok === true, 'device B download should pass')
+  assert(deviceBWorkspace?.profiles?.[0]?.id === 'env_smoke', 'device B should receive uploaded profile')
+  assert(deviceBWorkspace?.scriptSources?.[0]?.source.includes('main'), 'device B should receive script source')
 
   console.log('cloud smoke ok')
 } finally {

@@ -34,6 +34,7 @@ import { ProfileIdTakenError, InvalidProfileIdError } from './store'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
 import { CloudService, createWorkspaceSnapshot } from './cloud/service'
 import { CloudHttpServer } from './cloud/httpServer'
+import { CloudRemoteClient, type CloudBackend } from './cloud/client'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | undefined
@@ -43,7 +44,8 @@ const socksTunnelManager = new SocksTunnelManager()
 let scriptStore: ScriptStore
 let scriptRuntime: ScriptRuntimeManager
 let scriptBridge: ScriptBridge
-let cloudService: CloudService
+let cloudService: CloudService | undefined
+let cloudBackend: CloudBackend
 let cloudHttpServer: CloudHttpServer | undefined
 let activeCloudToken: string | undefined
 let cloudUploadTimer: NodeJS.Timeout | undefined
@@ -478,10 +480,13 @@ function scheduleCloudUpload(reason: string): void {
   if (cloudUploadTimer) clearTimeout(cloudUploadTimer)
   cloudUploadTimer = setTimeout(() => {
     cloudUploadTimer = undefined
-    const result = cloudService.syncNow(activeCloudToken, 'upload')
-    if (!result.ok) {
-      console.error('[cloud] deferred upload failed', reason, result.error.message)
-    }
+    void Promise.resolve(cloudBackend.syncNow(activeCloudToken, 'upload')).then((result) => {
+      if (!result.ok) {
+        console.error('[cloud] deferred upload failed', reason, result.error.message)
+      }
+    }).catch((error: unknown) => {
+      console.error('[cloud] deferred upload failed', reason, error)
+    })
   }, 1500)
 }
 
@@ -493,13 +498,15 @@ app.whenReady().then(async () => {
   proxyStore = new ProxyStore()
   store = new ProfileStore(proxyStore)
   scriptStore = new ScriptStore()
+  const cloudAdapter = { readLocalWorkspace, applyRemoteWorkspace }
+  const remoteCloudBaseUrl = process.env.AUTO_REGISTRY_CLOUD_BASE_URL?.trim()
   cloudService = new CloudService({
     rootDir: ensureCloudRoot(),
-    adapter: {
-      readLocalWorkspace,
-      applyRemoteWorkspace
-    }
+    adapter: cloudAdapter
   })
+  cloudBackend = remoteCloudBaseUrl
+    ? new CloudRemoteClient(remoteCloudBaseUrl, cloudAdapter)
+    : cloudService
   if (process.env.AUTO_REGISTRY_CLOUD_HTTP === '1') {
     cloudHttpServer = new CloudHttpServer(cloudService)
     const port = await cloudHttpServer.listen(Number(process.env.AUTO_REGISTRY_CLOUD_PORT || 0))
@@ -670,29 +677,29 @@ app.whenReady().then(async () => {
   ipcMain.handle('runtime:info', () => runtimeInfo())
 
   // —— cloud auth / sync / admin ————————————————————————————————
-  ipcMain.handle('cloud:session', () => activeCloudToken ? cloudService.getSession(activeCloudToken) : undefined)
-  ipcMain.handle('cloud:login', (_event, input: { username: string; password: string; deviceId?: string }) => {
-    const result = cloudService.login(input)
+  ipcMain.handle('cloud:session', () => activeCloudToken ? cloudBackend.getSession(activeCloudToken) : undefined)
+  ipcMain.handle('cloud:login', async (_event, input: { username: string; password: string; deviceId?: string }) => {
+    const result = await cloudBackend.login(input)
     if (result.ok) activeCloudToken = result.session.token
     return result
   })
-  ipcMain.handle('cloud:logout', () => {
-    if (activeCloudToken) cloudService.logout(activeCloudToken)
+  ipcMain.handle('cloud:logout', async () => {
+    if (activeCloudToken) await cloudBackend.logout(activeCloudToken)
     activeCloudToken = undefined
   })
-  ipcMain.handle('cloud:syncNow', (_event, direction: CloudSyncDirection) => {
+  ipcMain.handle('cloud:syncNow', async (_event, direction: CloudSyncDirection) => {
     if (cloudUploadTimer) {
       clearTimeout(cloudUploadTimer)
       cloudUploadTimer = undefined
     }
-    return cloudService.syncNow(activeCloudToken, direction)
+    return cloudBackend.syncNow(activeCloudToken, direction)
   })
-  ipcMain.handle('cloud:users:list', () => cloudService.listUsers(activeCloudToken))
-  ipcMain.handle('cloud:users:save', (_event, draft: CloudUserDraft) => cloudService.saveUser(activeCloudToken, draft))
-  ipcMain.handle('cloud:roles:list', () => cloudService.listRoles(activeCloudToken))
-  ipcMain.handle('cloud:roles:save', (_event, draft: CloudRoleDraft) => cloudService.saveRole(activeCloudToken, draft))
-  ipcMain.handle('cloud:permissions:list', () => cloudService.listPermissions(activeCloudToken))
-  ipcMain.handle('cloud:assets:get', (_event, userId: string) => cloudService.getUserAssets(activeCloudToken, userId))
+  ipcMain.handle('cloud:users:list', () => cloudBackend.listUsers(activeCloudToken))
+  ipcMain.handle('cloud:users:save', (_event, draft: CloudUserDraft) => cloudBackend.saveUser(activeCloudToken, draft))
+  ipcMain.handle('cloud:roles:list', () => cloudBackend.listRoles(activeCloudToken))
+  ipcMain.handle('cloud:roles:save', (_event, draft: CloudRoleDraft) => cloudBackend.saveRole(activeCloudToken, draft))
+  ipcMain.handle('cloud:permissions:list', () => cloudBackend.listPermissions(activeCloudToken))
+  ipcMain.handle('cloud:assets:get', (_event, userId: string) => cloudBackend.getUserAssets(activeCloudToken, userId))
 
   // —— scripts subsystem ————————————————————————————————————————
   ipcMain.handle('scripts:list', () => scriptStore.list())

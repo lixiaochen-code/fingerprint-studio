@@ -209,6 +209,56 @@ export class CloudService {
     }
   }
 
+  uploadWorkspace(token: string | undefined, snapshot: CloudWorkspaceSnapshot): CloudSyncResult {
+    const session = this.requireStoredSession(token, true)
+    if (!session) return { ok: false, error: { code: 'UNAUTHENTICATED', message: 'Login required' } }
+    if (!this.hasApiPermission(session.userId, 'api:sync:write')) {
+      return { ok: false, error: { code: 'FORBIDDEN', message: 'Missing api:sync:write' } }
+    }
+    const remote = this.state.workspaces[session.userId]
+    const next: CloudWorkspaceSnapshot = {
+      ...snapshot,
+      ownerUserId: session.userId,
+      revision: (remote?.revision ?? 0) + 1,
+      updatedAt: nowIso()
+    }
+    this.state.workspaces[session.userId] = next
+    this.audit(session.userId, 'sync.remote-upload', `rev:${next.revision}`)
+    this.save()
+    return {
+      ok: true,
+      direction: 'upload',
+      revision: next.revision,
+      uploaded: this.countWorkspaceItems(next),
+      downloaded: 0,
+      conflicts: [],
+      syncedAt: nowIso()
+    }
+  }
+
+  downloadWorkspace(token: string | undefined): { ok: true; snapshot: CloudWorkspaceSnapshot; result: CloudSyncResult } | CloudSyncResult {
+    const session = this.requireStoredSession(token, true)
+    if (!session) return { ok: false, error: { code: 'UNAUTHENTICATED', message: 'Login required' } }
+    if (!this.hasApiPermission(session.userId, 'api:sync:read')) {
+      return { ok: false, error: { code: 'FORBIDDEN', message: 'Missing api:sync:read' } }
+    }
+    const remote = this.state.workspaces[session.userId]
+    if (!remote) return { ok: false, error: { code: 'NO_REMOTE_WORKSPACE', message: 'No remote workspace' } }
+    return {
+      ok: true,
+      snapshot: remote,
+      result: {
+        ok: true,
+        direction: 'download',
+        revision: remote.revision,
+        uploaded: 0,
+        downloaded: this.countWorkspaceItems(remote),
+        conflicts: [],
+        syncedAt: nowIso()
+      }
+    }
+  }
+
   listUsers(token: string | undefined): CloudUser[] {
     this.requireApiPermission(token, 'admin:user:read')
     return this.state.users.map(publicUser)

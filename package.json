@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=8192 vite build && tsc -p tsconfig.electron.json",
     "preview": "vite preview --host 127.0.0.1",
     "validate:specs": "node scripts/validate-specs.mjs",
+    "cloud:server": "node scripts/cloud-server.mjs",
     "archive": "node scripts/archive-change.mjs",
     "dist:check": "node scripts/verify-electron-cache.mjs",
     "dist": "pnpm run dist:check && pnpm run build && electron-builder",

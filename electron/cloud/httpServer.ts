@@ -1,7 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { CloudService } from './service'
-import type { CloudRoleDraft, CloudSyncDirection, CloudUserDraft } from '../types'
+import type { CloudRoleDraft, CloudSyncDirection, CloudUserDraft, CloudWorkspaceSnapshot } from '../types'
 
 type JsonResponse = {
   status: number
@@ -127,6 +127,12 @@ export class CloudHttpServer {
     }
     if (method === 'POST' && url.pathname === '/sync') {
       return { status: 200, body: this.service.syncNow(token, directionField(body)) }
+    }
+    if (method === 'POST' && url.pathname === '/sync/upload') {
+      return { status: 200, body: this.service.uploadWorkspace(token, body as CloudWorkspaceSnapshot) }
+    }
+    if (method === 'GET' && url.pathname === '/sync/download') {
+      return { status: 200, body: this.service.downloadWorkspace(token) }
     }
     if (method === 'GET' && url.pathname === '/admin/users') {
       return { status: 200, body: { ok: true, users: this.service.listUsers(token) } }
