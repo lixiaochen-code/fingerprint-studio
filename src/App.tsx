@@ -16,6 +16,7 @@ import { ProfilesView } from '@/views/profiles'
 import { ProxiesView } from '@/views/proxies'
 import { ScriptsView } from '@/views/scripts'
 import { SettingsView } from '@/views/settings'
+import { CloudAdminView } from '@/views/cloud-admin'
 import type {
   BrowserProfile,
   KernelType,
@@ -26,7 +27,7 @@ import type {
 import './styles.css'
 
 /** 路由路径白名单。任何不在这里的 hash 都会被规整到 DEFAULT_VIEW。 */
-const ALL_VIEWS: readonly AppView[] = ['profiles', 'scripts', 'proxies', 'settings'] as const
+const ALL_VIEWS: readonly AppView[] = ['profiles', 'scripts', 'proxies', 'settings', 'cloud-admin'] as const
 const DEFAULT_VIEW: AppView = 'profiles'
 
 /**
@@ -339,7 +340,7 @@ export function App() {
       />
 
       {/*
-        四视图保活路由:每个 view 渲染一次后就保留在 React 树里,切走只是 display:none,
+        多视图保活路由:每个 view 渲染一次后就保留在 React 树里,切走只是 display:none,
         所有内部状态 / Monaco 实例 / 滚动位置 / 订阅都保留。
         Environments 默认就 mount(用户进来第一眼就需要);Scripts/Settings 走 lazy,
         第一次切到才挂载,避免 Monaco chunk 在用户没看脚本前就被请求。
@@ -404,6 +405,10 @@ export function App() {
             kind === 'error' ? toast.error(message) : toast.success(message)
           }
         />
+      </KeepAlive>
+
+      <KeepAlive visible={view === 'cloud-admin'}>
+        <CloudAdminView locale={locale} onSynced={reload} />
       </KeepAlive>
 
       <KeepAlive visible={view === 'settings'}>

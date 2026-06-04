@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, Proxy, ProxyConfig, ProxyDraft, ProxyTestSnapshot, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, CloudAdminAssets, CloudLoginResult, CloudPermission, CloudRole, CloudRoleDraft, CloudSession, CloudSyncDirection, CloudSyncResult, CloudUser, CloudUserDraft, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, Proxy, ProxyConfig, ProxyDraft, ProxyTestSnapshot, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from './types'
 import type { ScriptRuntimeEvent } from './scripts/runtime'
 import type { ProxyTestResult } from './proxyTest'
 
@@ -113,6 +113,28 @@ const api = {
       const handler = (_event: unknown, payload: ScriptRuntimeEvent) => listener(payload)
       ipcRenderer.on('scripts:event', handler)
       return () => ipcRenderer.removeListener('scripts:event', handler)
+    }
+  },
+  cloud: {
+    session: () => ipcRenderer.invoke('cloud:session') as Promise<CloudSession | undefined>,
+    login: (input: { username: string; password: string; deviceId?: string }) =>
+      ipcRenderer.invoke('cloud:login', input) as Promise<CloudLoginResult>,
+    logout: () => ipcRenderer.invoke('cloud:logout') as Promise<void>,
+    syncNow: (direction: CloudSyncDirection) =>
+      ipcRenderer.invoke('cloud:syncNow', direction) as Promise<CloudSyncResult>,
+    users: {
+      list: () => ipcRenderer.invoke('cloud:users:list') as Promise<CloudUser[]>,
+      save: (draft: CloudUserDraft) => ipcRenderer.invoke('cloud:users:save', draft) as Promise<CloudUser>
+    },
+    roles: {
+      list: () => ipcRenderer.invoke('cloud:roles:list') as Promise<CloudRole[]>,
+      save: (draft: CloudRoleDraft) => ipcRenderer.invoke('cloud:roles:save', draft) as Promise<CloudRole>
+    },
+    permissions: {
+      list: () => ipcRenderer.invoke('cloud:permissions:list') as Promise<CloudPermission[]>
+    },
+    assets: {
+      get: (userId: string) => ipcRenderer.invoke('cloud:assets:get', userId) as Promise<CloudAdminAssets>
     }
   }
 }

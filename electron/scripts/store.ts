@@ -190,6 +190,24 @@ export class ScriptStore {
     this.saveMeta()
   }
 
+  replaceSyncedScripts(input: { scripts: Script[]; sources: Array<{ scriptId: string; source: string }> }): void {
+    this.scripts = input.scripts.map((script) => {
+      if (script.source === 'external') return script
+      return {
+        ...script,
+        source: 'local',
+        entryPath: path.join(scriptsRoot(), script.id, 'index.ts')
+      }
+    })
+    const sourceByScriptId = new Map(input.sources.map((item) => [item.scriptId, item.source] as const))
+    for (const script of this.scripts) {
+      if (script.source !== 'local') continue
+      fs.mkdirSync(path.dirname(script.entryPath), { recursive: true })
+      fs.writeFileSync(script.entryPath, sourceByScriptId.get(script.id) ?? DEFAULT_SCRIPT_SOURCE)
+    }
+    this.saveMeta()
+  }
+
   // —— ScriptRun history ————————————————————————————————————————
 
   listRuns(): ScriptRun[] {

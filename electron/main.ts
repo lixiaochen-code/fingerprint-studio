@@ -6,7 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } fr
 import { extractFull } from 'node-7z'
 import sevenBin from '7zip-bin'
 import { makeFingerprint, ProfileStore } from './store'
-import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, FingerprintMode, KernelType, ProfileDraft, Proxy, ProxyDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
+import type { BrowserCrashEvent, BrowserProfile, BrowserRuntimeStatus, CloudRoleDraft, CloudSyncDirection, CloudUserDraft, FingerprintMode, KernelType, ProfileDraft, Proxy, ProxyDraft, RuntimeInfo, KernelInstallProgress, Script, ScriptDraft } from './types'
 import { hostOs } from './fingerprint'
 import {
   KernelMissingError,
@@ -19,7 +19,7 @@ import {
   selectKernel
 } from './kernel'
 import { cancelInstall, installKernel, isInstalling } from './downloader'
-import { ensureDirs, pluginsRoot } from './paths'
+import { dataRoot, ensureDirs, pluginsRoot } from './paths'
 import { ScriptStore } from './scripts/store'
 import { ScriptRuntimeManager, ProfileBusyError, type ScriptRuntimeEvent } from './scripts/runtime'
 import { ScriptBridge } from './scripts/bridge'
@@ -32,6 +32,8 @@ import { parseProxyBatch } from './proxies/parser'
 import { SocksTunnelManager, type SocksProxyConfig } from './proxies/socksTunnel'
 import { ProfileIdTakenError, InvalidProfileIdError } from './store'
 import { waitForDevToolsEndpoint } from './scripts/cdp'
+import { CloudService, createWorkspaceSnapshot } from './cloud/service'
+import { CloudHttpServer } from './cloud/httpServer'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | undefined
@@ -41,6 +43,10 @@ const socksTunnelManager = new SocksTunnelManager()
 let scriptStore: ScriptStore
 let scriptRuntime: ScriptRuntimeManager
 let scriptBridge: ScriptBridge
+let cloudService: CloudService
+let cloudHttpServer: CloudHttpServer | undefined
+let activeCloudToken: string | undefined
+let cloudUploadTimer: NodeJS.Timeout | undefined
 const profileProcesses = new Map<string, ChildProcess>()
 const STDERR_TAIL_LIMIT = 8 * 1024 // 8KB of recent stderr per profile, cheap and enough for stack traces
 
@@ -429,6 +435,56 @@ function serializeError(error: unknown) {
   return { message: String(error) }
 }
 
+function ensureCloudRoot(): string {
+  const root = path.join(dataRoot(), 'cloud')
+  fs.mkdirSync(root, { recursive: true })
+  return root
+}
+
+function readLocalWorkspace(ownerUserId: string) {
+  const scripts = scriptStore.list()
+  return createWorkspaceSnapshot({
+    ownerUserId,
+    profiles: store.list(),
+    proxies: proxyStore.list(),
+    scripts,
+    scriptSources: scripts
+      .filter((script) => script.source === 'local')
+      .map((script) => {
+        try {
+          return { scriptId: script.id, source: scriptStore.readSource(script.id) }
+        } catch {
+          return { scriptId: script.id, source: '' }
+        }
+      }),
+    plugins: store.listPlugins()
+  })
+}
+
+function applyRemoteWorkspace(snapshot: ReturnType<typeof readLocalWorkspace>) {
+  proxyStore.setAll(snapshot.proxies)
+  store.replaceSyncedData({
+    profiles: snapshot.profiles,
+    plugins: snapshot.plugins
+  })
+  scriptStore.replaceSyncedScripts({
+    scripts: snapshot.scripts,
+    sources: snapshot.scriptSources
+  })
+}
+
+function scheduleCloudUpload(reason: string): void {
+  if (!activeCloudToken) return
+  if (cloudUploadTimer) clearTimeout(cloudUploadTimer)
+  cloudUploadTimer = setTimeout(() => {
+    cloudUploadTimer = undefined
+    const result = cloudService.syncNow(activeCloudToken, 'upload')
+    if (!result.ok) {
+      console.error('[cloud] deferred upload failed', reason, result.error.message)
+    }
+  }, 1500)
+}
+
 app.whenReady().then(async () => {
   ensureDirs()
   // 启动自检：清掉上次会话的孤儿脚本子进程 + Chromium SingletonLock 残留。
@@ -437,6 +493,18 @@ app.whenReady().then(async () => {
   proxyStore = new ProxyStore()
   store = new ProfileStore(proxyStore)
   scriptStore = new ScriptStore()
+  cloudService = new CloudService({
+    rootDir: ensureCloudRoot(),
+    adapter: {
+      readLocalWorkspace,
+      applyRemoteWorkspace
+    }
+  })
+  if (process.env.AUTO_REGISTRY_CLOUD_HTTP === '1') {
+    cloudHttpServer = new CloudHttpServer(cloudService)
+    const port = await cloudHttpServer.listen(Number(process.env.AUTO_REGISTRY_CLOUD_PORT || 0))
+    console.log(`[cloud] HTTP API listening on 127.0.0.1:${port}`)
+  }
   scriptRuntime = new ScriptRuntimeManager(scriptStore)
   // wiring 顺序:runtime → bridge → setBridge。
   // 为什么必须这个顺序:ScriptBridge 构造时就要 runtime 引用(在 ctor 内立即
@@ -481,6 +549,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('profiles:save', (_event, draft: ProfileDraft) => {
     try {
       const profile = store.upsert(draft)
+      scheduleCloudUpload('profiles:save')
       return { ok: true as const, profile }
     } catch (error) {
       return { ok: false as const, error: serializeError(error) }
@@ -490,6 +559,7 @@ app.whenReady().then(async () => {
     // 渲染层 IPC 路径:用户从 UI 删,**不**做 PROFILE_BUSY 检查 —— 行为与历史一致
     // (用户对自己删的环境负责);bridge 路径(profiles.delete)走互斥检查,见 ScriptBridge。
     await deleteProfile(id)
+    scheduleCloudUpload('profiles:remove')
   })
   ipcMain.handle('profiles:duplicate', (_event, id: string) => {
     const source = store.get(id)
@@ -517,6 +587,7 @@ app.whenReady().then(async () => {
         }
       })
     }
+    scheduleCloudUpload('profiles:duplicate')
     return next
   })
   ipcMain.handle('profiles:randomFingerprint', (_event, targetOs?: string) => makeFingerprint(undefined, targetOs as never))
@@ -540,11 +611,19 @@ app.whenReady().then(async () => {
 
   // —— proxies subsystem (ProxyStore) ——————————————————————————
   ipcMain.handle('proxies:list', () => proxyStore.list())
-  ipcMain.handle('proxies:save', (_event, draft: ProxyDraft) => proxyStore.upsert(draft))
-  ipcMain.handle('proxies:remove', (_event, id: string) => proxyStore.remove(id))
+  ipcMain.handle('proxies:save', (_event, draft: ProxyDraft) => {
+    const proxy = proxyStore.upsert(draft)
+    scheduleCloudUpload('proxies:save')
+    return proxy
+  })
+  ipcMain.handle('proxies:remove', (_event, id: string) => {
+    proxyStore.remove(id)
+    scheduleCloudUpload('proxies:remove')
+  })
   ipcMain.handle('proxies:bulkImport', (_event, text: string) => {
     const parsed = parseProxyBatch(text)
     const { created, reused } = proxyStore.bulkUpsert(parsed.ok.map((entry) => entry.draft))
+    if (created.length) scheduleCloudUpload('proxies:bulkImport')
     return { created, reused, failed: parsed.failed }
   })
   // 测试 ProxyStore 条目 —— 与老 proxy:test 不同点:
@@ -561,11 +640,19 @@ app.whenReady().then(async () => {
       password: proxy.password
     })
     proxyStore.recordTest(id, snapshot)
+    scheduleCloudUpload('proxies:test')
     return { ok: true as const, snapshot }
   })
   ipcMain.handle('plugins:list', () => store.listPlugins())
-  ipcMain.handle('plugins:importZip', () => importPluginZip())
-  ipcMain.handle('plugins:setActiveVersion', (_event, pluginId: string, versionId: string) => store.setActivePluginVersion(pluginId, versionId))
+  ipcMain.handle('plugins:importZip', async () => {
+    const plugin = await importPluginZip()
+    if (plugin) scheduleCloudUpload('plugins:importZip')
+    return plugin
+  })
+  ipcMain.handle('plugins:setActiveVersion', (_event, pluginId: string, versionId: string) => {
+    store.setActivePluginVersion(pluginId, versionId)
+    scheduleCloudUpload('plugins:setActiveVersion')
+  })
   ipcMain.handle('plugins:remove', (_event, pluginId: string) => {
     const plugin = store.listPlugins().find((item) => item.id === pluginId)
     store.removePlugin(pluginId)
@@ -578,8 +665,34 @@ app.whenReady().then(async () => {
         console.error('[plugins:remove] failed to delete plugin dir', version.path, error)
       }
     }
+    scheduleCloudUpload('plugins:remove')
   })
   ipcMain.handle('runtime:info', () => runtimeInfo())
+
+  // —— cloud auth / sync / admin ————————————————————————————————
+  ipcMain.handle('cloud:session', () => activeCloudToken ? cloudService.getSession(activeCloudToken) : undefined)
+  ipcMain.handle('cloud:login', (_event, input: { username: string; password: string; deviceId?: string }) => {
+    const result = cloudService.login(input)
+    if (result.ok) activeCloudToken = result.session.token
+    return result
+  })
+  ipcMain.handle('cloud:logout', () => {
+    if (activeCloudToken) cloudService.logout(activeCloudToken)
+    activeCloudToken = undefined
+  })
+  ipcMain.handle('cloud:syncNow', (_event, direction: CloudSyncDirection) => {
+    if (cloudUploadTimer) {
+      clearTimeout(cloudUploadTimer)
+      cloudUploadTimer = undefined
+    }
+    return cloudService.syncNow(activeCloudToken, direction)
+  })
+  ipcMain.handle('cloud:users:list', () => cloudService.listUsers(activeCloudToken))
+  ipcMain.handle('cloud:users:save', (_event, draft: CloudUserDraft) => cloudService.saveUser(activeCloudToken, draft))
+  ipcMain.handle('cloud:roles:list', () => cloudService.listRoles(activeCloudToken))
+  ipcMain.handle('cloud:roles:save', (_event, draft: CloudRoleDraft) => cloudService.saveRole(activeCloudToken, draft))
+  ipcMain.handle('cloud:permissions:list', () => cloudService.listPermissions(activeCloudToken))
+  ipcMain.handle('cloud:assets:get', (_event, userId: string) => cloudService.getUserAssets(activeCloudToken, userId))
 
   // —— scripts subsystem ————————————————————————————————————————
   ipcMain.handle('scripts:list', () => scriptStore.list())
@@ -588,16 +701,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('scripts:activeByProfile', (_event, profileId: string) =>
     scriptRuntime.getActiveByProfile(profileId)
   )
-  ipcMain.handle('scripts:save', (_event, draft: ScriptDraft): Script => scriptStore.upsert(draft))
+  ipcMain.handle('scripts:save', (_event, draft: ScriptDraft): Script => {
+    const script = scriptStore.upsert(draft)
+    scheduleCloudUpload('scripts:save')
+    return script
+  })
   ipcMain.handle('scripts:remove', (_event, id: string) => {
     // 杀掉该脚本所有活跃 run，再删
     for (const run of scriptRuntime.listActive()) {
       if (run.scriptId === id) void scriptRuntime.stop(run.id)
     }
     scriptStore.remove(id)
+    scheduleCloudUpload('scripts:remove')
   })
   ipcMain.handle('scripts:readSource', (_event, id: string) => scriptStore.readSource(id))
-  ipcMain.handle('scripts:writeSource', (_event, id: string, source: string) => scriptStore.writeSource(id, source))
+  ipcMain.handle('scripts:writeSource', (_event, id: string, source: string) => {
+    scriptStore.writeSource(id, source)
+    scheduleCloudUpload('scripts:writeSource')
+  })
   ipcMain.handle('scripts:run', async (_event, scriptId: string, profileId: string) => {
     const script = scriptStore.get(scriptId)
     if (!script) throw new Error(`Script not found: ${scriptId}`)
@@ -838,7 +959,8 @@ app.on('before-quit', (event) => {
       await Promise.all([
         scriptRuntime?.shutdown() ?? Promise.resolve(),
         terminateAllProfileBrowsers(),
-        socksTunnelManager.closeAll()
+        socksTunnelManager.closeAll(),
+        cloudHttpServer?.close() ?? Promise.resolve()
       ])
     } catch (error) {
       console.error('[main] cleanup before quit failed:', error)

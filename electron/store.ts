@@ -114,6 +114,19 @@ export class ProfileStore {
     return this.plugins
   }
 
+  replaceSyncedData(input: { profiles: BrowserProfile[]; plugins: BrowserPlugin[] }) {
+    this.profiles = input.profiles.map((profile) => ({
+      ...profile,
+      enabledPluginIds: profile.enabledPluginIds ?? [],
+      fingerprint: makeFingerprint(profile.fingerprint)
+    }))
+    this.plugins = input.plugins
+    for (const profile of this.profiles) {
+      fs.mkdirSync(profile.profilePath, { recursive: true })
+    }
+    this.save()
+  }
+
   upsert(draft: ProfileDraft) {
     const now = new Date().toISOString()
     const existing = draft.id ? this.profiles.find((profile) => profile.id === draft.id) : undefined

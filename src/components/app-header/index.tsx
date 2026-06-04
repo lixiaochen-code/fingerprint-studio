@@ -6,6 +6,7 @@ import {
   Layers,
   Monitor,
   Moon,
+  Shield,
   Settings2,
   Sun
 } from 'lucide-react'
@@ -27,7 +28,7 @@ import type {
   ScriptRun
 } from '../../../electron/types'
 
-export type AppView = 'profiles' | 'scripts' | 'proxies' | 'settings'
+export type AppView = 'profiles' | 'scripts' | 'proxies' | 'settings' | 'cloud-admin'
 
 export interface AppHeaderProps {
   t: Translations
@@ -80,6 +81,7 @@ export function AppHeader({
     { view: 'profiles', label: locale === 'zh' ? '环境' : 'Environments', Icon: Layers },
     { view: 'scripts', label: locale === 'zh' ? '脚本' : 'Scripts', Icon: FileCode2 },
     { view: 'proxies', label: locale === 'zh' ? '代理' : 'Proxies', Icon: Globe2 },
+    { view: 'cloud-admin', label: locale === 'zh' ? '后台' : 'Admin', Icon: Shield },
     { view: 'settings', label: t.settings, Icon: Settings2 }
   ]
 

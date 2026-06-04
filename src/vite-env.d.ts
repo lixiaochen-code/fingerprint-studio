@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, Proxy, ProxyConfig, ProxyDraft, ProxyTestSnapshot, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from '../electron/types'
+import type { BrowserCrashEvent, BrowserPlugin, BrowserProfile, CloudAdminAssets, CloudLoginResult, CloudPermission, CloudRole, CloudRoleDraft, CloudSession, CloudSyncDirection, CloudSyncResult, CloudUser, CloudUserDraft, FingerprintConfig, KernelInstallProgress, KernelStatusMap, KernelType, ProfileDraft, Proxy, ProxyConfig, ProxyDraft, ProxyTestSnapshot, RuntimeInfo, Script, ScriptDraft, ScriptRun, TargetOsChoice } from '../electron/types'
 import type { ScriptRuntimeEvent } from '../electron/scripts/runtime'
 import type { ProxyTestResult } from '../electron/proxyTest'
 
@@ -85,6 +85,26 @@ declare global {
         pickExternalFile: () => Promise<string | undefined>
         revealInFinder: (filePath: string) => Promise<void>
         onEvent: (listener: (event: ScriptRuntimeEvent) => void) => () => void
+      }
+      cloud: {
+        session: () => Promise<CloudSession | undefined>
+        login: (input: { username: string; password: string; deviceId?: string }) => Promise<CloudLoginResult>
+        logout: () => Promise<void>
+        syncNow: (direction: CloudSyncDirection) => Promise<CloudSyncResult>
+        users: {
+          list: () => Promise<CloudUser[]>
+          save: (draft: CloudUserDraft) => Promise<CloudUser>
+        }
+        roles: {
+          list: () => Promise<CloudRole[]>
+          save: (draft: CloudRoleDraft) => Promise<CloudRole>
+        }
+        permissions: {
+          list: () => Promise<CloudPermission[]>
+        }
+        assets: {
+          get: (userId: string) => Promise<CloudAdminAssets>
+        }
       }
     }
   }

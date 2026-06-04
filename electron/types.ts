@@ -1,3 +1,5 @@
+import type { Proxy } from './proxies/schema'
+
 export type ProxyConfig = {
   host: string
   port: number
@@ -239,4 +241,123 @@ export type ScriptDraft = {
   entryPath?: string
   /** 仅 local 新建时有意义：初始源码，会写入 index.ts */
   initialSource?: string
+}
+
+// —— Cloud auth / sync / admin ————————————————————————————————
+
+export type CloudPermissionType = 'page' | 'button' | 'api'
+
+export type CloudPermission = {
+  id: string
+  type: CloudPermissionType
+  name: string
+  description?: string
+  /**
+   * 页面/按钮可绑定后端 API 权限，方便后台 UI 配置“看得到且点得动”。
+   * 后端鉴权只看 api permission 自身，不依赖页面/按钮。
+   */
+  apiPermissionIds?: string[]
+}
+
+export type CloudRole = {
+  id: string
+  name: string
+  description?: string
+  permissionIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type CloudUserStatus = 'active' | 'disabled'
+
+export type CloudUser = {
+  id: string
+  username: string
+  displayName: string
+  status: CloudUserStatus
+  roleIds: string[]
+  isSuperAdmin: boolean
+  createdAt: string
+  updatedAt: string
+  lastLoginAt?: string
+}
+
+export type CloudSession = {
+  token: string
+  user: CloudUser
+  roles: CloudRole[]
+  permissions: CloudPermission[]
+  deviceId: string
+}
+
+export type CloudLoginResult =
+  | { ok: true; session: CloudSession }
+  | { ok: false; error: { code: 'INVALID_CREDENTIALS' | 'USER_DISABLED'; message: string } }
+
+export type CloudSyncDirection = 'upload' | 'download' | 'bidirectional'
+
+export type CloudScriptSourceSnapshot = {
+  scriptId: string
+  source: string
+}
+
+export type CloudWorkspaceSnapshot = {
+  schemaVersion: 1
+  revision: number
+  ownerUserId: string
+  updatedAt: string
+  profiles: BrowserProfile[]
+  proxies: Proxy[]
+  scripts: Script[]
+  scriptSources: CloudScriptSourceSnapshot[]
+  plugins: BrowserPlugin[]
+  settings: Record<string, unknown>
+}
+
+export type CloudSyncConflict = {
+  resourceType: 'profile' | 'proxy' | 'script' | 'plugin' | 'settings'
+  resourceId: string
+  localRevision: number
+  remoteRevision: number
+  message: string
+}
+
+export type CloudSyncResult =
+  | {
+      ok: true
+      direction: CloudSyncDirection
+      revision: number
+      uploaded: number
+      downloaded: number
+      conflicts: CloudSyncConflict[]
+      syncedAt: string
+    }
+  | { ok: false; error: { code: 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NO_REMOTE_WORKSPACE'; message: string } }
+
+export type CloudUserDraft = {
+  id?: string
+  username: string
+  displayName: string
+  password?: string
+  status: CloudUserStatus
+  roleIds: string[]
+}
+
+export type CloudRoleDraft = {
+  id?: string
+  name: string
+  description?: string
+  permissionIds: string[]
+}
+
+export type CloudAdminAssets = {
+  user: CloudUser
+  workspace?: {
+    revision: number
+    updatedAt: string
+    profiles: Array<Pick<BrowserProfile, 'id' | 'name' | 'updatedAt' | 'proxyId'>>
+    proxies: Array<Omit<Proxy, 'password'> & { password?: string | '***' }>
+    scripts: Array<Pick<Script, 'id' | 'name' | 'scope' | 'source' | 'updatedAt'>>
+    plugins: Array<Pick<BrowserPlugin, 'id' | 'name' | 'activeVersionId' | 'updatedAt'>>
+  }
 }
